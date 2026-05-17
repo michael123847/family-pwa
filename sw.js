@@ -29,7 +29,7 @@
  *  current version's set.
  */
 
-const VERSION   = 'v9';
+const VERSION   = 'v10';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 
