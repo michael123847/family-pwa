@@ -1,0 +1,147 @@
+/**
+ * sw.js — Service Worker for offline support.
+ *
+ * A Service Worker is a script that runs in the background, separate from
+ * the browser tab. It intercepts all network requests made by the app and
+ * can serve responses from a local cache, making the app work offline.
+ *
+ * This Service Worker uses two caches:
+ *
+ *  APP_SHELL cache ("shell-vN"):
+ *    Contains all static files that make up the app itself (HTML, CSS, JS).
+ *    Strategy: cache-first — always serve from cache, fall back to network.
+ *    These files rarely change, and when they do the VERSION string is bumped
+ *    which triggers a fresh install of the new shell.
+ *
+ *  RUNTIME cache ("runtime-vN"):
+ *    Contains responses from the two public APIs (open-meteo, transport.opendata.ch).
+ *    Strategy: network-first with 4-second timeout — try the network, fall back
+ *    to cached data if the network is slow or offline.
+ *
+ * Local server requests (192.168.1.187, *.local) are NEVER intercepted.
+ * They need the Authorization header attached by the app and must always
+ * return fresh data — caching them here would break authentication and
+ * show stale todos or images.
+ *
+ * Updating the Service Worker:
+ *  Bump VERSION to force all clients to install the new worker and clear
+ *  old caches. The activate event deletes any cache that is not in the
+ *  current version's set.
+ */
+
+const VERSION   = 'v7';
+const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
+const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
+
+// All static files that must be cached during installation.
+// If any file fails to download, the installation is aborted.
+const SHELL_ASSETS = [
+  './',
+  './index.html',
+  './style.css',
+  './manifest.webmanifest',
+  './src/main.js',
+  './src/app.js',
+  './src/config.js',
+  './src/auth.js',
+  './src/localBridge.js',
+  './src/siteConfig.js',
+  './src/modules/weather.js',
+  './src/modules/transit.js',
+  './src/modules/todo.js',
+  './src/modules/background.js',
+  './src/modules/swatch.js',
+  './src/modules/photos.js',
+  './src/modules/hauschat.js',
+];
+
+/**
+ * Install event — runs once when the Service Worker is first registered or
+ * when VERSION changes. Downloads and caches all shell assets.
+ * skipWaiting() makes the new worker take over immediately without waiting
+ * for existing tabs to close.
+ */
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(APP_SHELL)
+      .then(c => c.addAll(SHELL_ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
+
+/**
+ * Activate event — runs after the new Service Worker takes over.
+ * Deletes all caches that do not belong to the current version, freeing
+ * storage space left by older versions.
+ * clients.claim() makes the worker control existing open tabs immediately.
+ */
+self.addEventListener('activate', e => {
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter(k => k !== APP_SHELL && k !== RUNTIME) // keep only current version
+        .map(k => caches.delete(k))
+    );
+    self.clients.claim();
+  })());
+});
+
+/**
+ * Fetch event — intercepts every network request made by the app.
+ * Routes each request to the appropriate caching strategy.
+ */
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+
+  // ── Local server ─────────────────────────────────────────────────────
+  // Never intercept — these requests need auth headers and fresh data.
+  // Returning without calling e.respondWith() lets the browser handle them.
+  if (url.hostname === '192.168.1.187' || url.hostname.endsWith('.local')) {
+    return;
+  }
+
+  // ── App shell ─────────────────────────────────────────────────────────
+  // Requests to the same origin as the app (GitHub Pages) = static files.
+  // Serve from cache immediately; fetch from network only if not cached.
+  if (url.origin === self.location.origin) {
+    e.respondWith(
+      caches.match(e.request).then(r => r || fetch(e.request))
+    );
+    return;
+  }
+
+  // ── Public APIs ───────────────────────────────────────────────────────
+  // open-meteo and transport.opendata.ch — network-first, cache as fallback.
+  e.respondWith(networkFirst(e.request, RUNTIME, 4000));
+});
+
+/**
+ * Network-first strategy with timeout.
+ * Tries to fetch from the network within timeoutMs milliseconds.
+ * If the request succeeds, caches the response for offline use.
+ * If it fails (offline or timeout), returns the last cached response.
+ * If nothing is cached either, returns a synthetic 503 response.
+ *
+ * @param {Request} req         - The original request.
+ * @param {string}  cacheName   - Which cache bucket to use.
+ * @param {number}  timeoutMs   - How long to wait before giving up on the network.
+ * @returns {Promise<Response>}
+ */
+async function networkFirst(req, cacheName, timeoutMs) {
+  const cache = await caches.open(cacheName);
+  try {
+    // AbortController lets us cancel the fetch after the timeout expires.
+    const ctrl = new AbortController();
+    const t    = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r    = await fetch(req, { signal: ctrl.signal });
+    clearTimeout(t);
+    // Only cache successful responses — don't cache error pages.
+    if (r.ok) cache.put(req, r.clone());
+    return r;
+  } catch {
+    // Network failed or timed out — try the cache.
+    const cached = await cache.match(req);
+    return cached || new Response('offline', { status: 503 });
+  }
+}

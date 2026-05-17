@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Setup – Zertifikat installieren</title>
+  <style>
+    body { font: 16px system-ui; max-width: 42em; margin: 2em auto; padding: 0 1.2em; line-height: 1.6; color: #1a1a2e; }
+    h1   { font-size: 1.4rem; line-height: 1.2; border-bottom: 2px solid #e0e0e0; padding-bottom: .4em; }
+    h2   { font-size: 1.05rem; margin-top: 2em; }
+    .btn {
+      display: inline-block; padding: .75em 1.3em; background: #0b5; color: #fff;
+      text-decoration: none; border-radius: 8px; margin: .3em 0; font-weight: 600;
+    }
+    .warn {
+      background: #fff3cd; border-left: 4px solid #f80;
+      padding: .9em 1.1em; margin: .8em 0; border-radius: 4px; font-size: .9rem;
+    }
+    .warn strong { color: #8a5700; }
+    code { background: #eee; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+    ol   { padding-left: 1.4em; }
+    ol li { margin: .4em 0; }
+    hr   { border: none; border-top: 1px solid #e0e0e0; margin: 2em 0; }
+    footer { font-size: .85rem; color: #666; }
+  </style>
+</head>
+<body>
+
+<h1>Familien-PWA · Einmaliges Setup</h1>
+
+<p>Damit dein Gerät die lokalen Funktionen (TODO-Liste, Familienbild) nutzen kann,
+muss einmalig das Sicherheitszertifikat der Heim-CA installiert werden.
+Danach funktioniert alles automatisch, solange du im Heim-WLAN bist.</p>
+
+<h2>iOS / iPadOS</h2>
+<p><a class="btn" href="rootCA.crt">Zertifikat herunterladen (iOS)</a></p>
+<ol>
+  <li>Tippe auf den Download-Button — Safari fragt, ob du das Profil installieren möchtest.</li>
+  <li><strong>Einstellungen → VPN &amp; Geräteverwaltung → mkcert…</strong> → «Installieren».</li>
+  <li><strong>Wichtig:</strong> Einstellungen → Allgemein → Info → <em>Zertifikatsvertrauenseinstellungen</em>
+      → Toggle für «mkcert …» aktivieren.</li>
+</ol>
+<div class="warn">
+  <strong>Ohne Schritt 3 funktioniert nichts.</strong>
+  iOS installiert das Profil, vertraut ihm aber nicht automatisch.
+  Es gibt keine sichtbare Fehlermeldung — der Browser schlägt einfach still fehl.
+</div>
+
+<h2>macOS</h2>
+<p><a class="btn" href="rootCA.pem">Zertifikat herunterladen</a></p>
+<ol>
+  <li>Datei doppelklicken → Schlüsselbund-App öffnet.</li>
+  <li>In den <strong>System</strong>-Schlüsselbund importieren (nicht «Anmeldung»).</li>
+  <li>Zertifikat im Schlüsselbund doppelklicken → <em>Vertrauen</em> aufklappen
+      → «Immer vertrauen» wählen → Schliessen &amp; Passwort bestätigen.</li>
+</ol>
+
+<h2>Android</h2>
+<p><a class="btn" href="rootCA.pem">Zertifikat herunterladen</a></p>
+<ol>
+  <li>Einstellungen → Sicherheit → Verschlüsselung &amp; Anmeldedaten
+      → «CA-Zertifikat installieren».</li>
+  <li>Heruntergeladene <code>rootCA.pem</code> auswählen &amp; bestätigen.</li>
+</ol>
+<div class="warn">
+  <strong>Hinweis:</strong> Android-Chrome zeigt für user-installierte CAs ggf. eine
+  Sicherheitswarnung in der Adressleiste. Das ist erwartet und harmlos.
+</div>
+
+<h2>Windows</h2>
+<p><a class="btn" href="rootCA.pem">Zertifikat herunterladen</a></p>
+<ol>
+  <li><code>Win+R</code> → <code>certmgr.msc</code> → Enter.</li>
+  <li><em>Vertrauenswürdige Stammzertifizierungsstellen</em> → <em>Zertifikate</em>
+      → Rechtsklick → Alle Aufgaben → Importieren.</li>
+  <li>Heruntergeladene Datei auswählen, Speicherort bestätigen.</li>
+</ol>
+
+<hr>
+<footer>
+  <a href="../">← Zurück zur App</a>
+</footer>
+
+</body>
+</html>

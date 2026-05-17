@@ -1,0 +1,122 @@
+/**
+ * app.js — Application bootstrap.
+ *
+ * boot() is called once by main.js after authentication succeeds.
+ * It wires up the tab navigation, registers the Service Worker, and
+ * kicks off all feature modules in parallel (weather, transit, background
+ * image, todo list, colour picker).
+ *
+ * updateLocalStatus() polls the local server every 30 seconds and updates
+ * the green/grey status dot in the top-right corner of the home screen.
+ */
+
+import { loadWeather }         from './modules/weather.js';
+import { loadTransit }         from './modules/transit.js';
+import { setFamilyBackground } from './modules/background.js';
+import { initTodo }            from './modules/todo.js';
+import { initSwatch }          from './modules/swatch.js';
+import { initPhotos }          from './modules/photos.js';
+import { initHauschat }        from './modules/hauschat.js';
+import { loadSiteConfig, getSiteConfig } from './siteConfig.js';
+import { isLocalAvailable }    from './localBridge.js';
+
+export async function boot() {
+  initTabs();
+
+  // Register the Service Worker for offline caching of the app shell.
+  // Errors are silently ignored — the app works without a SW.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
+  // Weather and departures need the location config from the local server.
+  // Fetch it (cached after the first home-network visit), then start them.
+  loadSiteConfig().then(() => { loadWeather(); loadTransit(); });
+  setInterval(locationTick, 60_000); // refresh config + departures every minute
+
+  setFamilyBackground(document.getElementById('family-bg'));
+  initTodo();
+  initSwatch();
+  initPhotos();
+  initHauschat();
+
+  // Show initial server status, then refresh every 30 s (matches health-check TTL).
+  updateLocalStatus();
+  setInterval(updateLocalStatus, 30_000);
+}
+
+/**
+ * Runs every 60 seconds: refreshes the site config so weather and departures
+ * start working as soon as the device reaches the home network, then reloads
+ * the departures. Weather is reloaded only when the config first arrives.
+ */
+async function locationTick() {
+  const hadConfig = !!getSiteConfig();
+  await loadSiteConfig();
+  if (!hadConfig && getSiteConfig()) loadWeather();
+  loadTransit();
+}
+
+/**
+ * Checks whether the local WLAN server is reachable and updates the
+ * status dot (#local-status) with CSS classes 'online' or 'offline'.
+ */
+async function updateLocalStatus() {
+  const el = document.getElementById('local-status');
+  if (!el) return;
+  const online = await isLocalAvailable();
+  el.classList.toggle('online',  online);
+  el.classList.toggle('offline', !online);
+  el.title = online ? 'Local server: Online' : 'Local server: Offline';
+}
+
+// Top-level tabs in the bottom bar. Each one has a matching page div
+// (data-page="todo" → id="page-todo").
+const TABS = ['home', 'todo', 'photos', 'diverses'];
+
+// Subpages are not tabs — they are opened from a menu (e.g. the colour
+// picker from the "Diverses" menu). The value is the tab that stays
+// highlighted while the subpage is open.
+const SUBPAGE_OWNER = { color: 'diverses' };
+
+/**
+ * Sets up the bottom tab bar and the subpage navigation.
+ *
+ * Tab buttons (.tab-btn[data-page]) switch between the top-level pages.
+ * Menu items ([data-subpage]) open a subpage. Back buttons ([data-back])
+ * return from a subpage to its owning tab page. The last top-level tab is
+ * stored in localStorage so the user lands on it again after a reload;
+ * subpages are never restored.
+ */
+function initTabs() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const pages   = document.querySelectorAll('.page');
+
+  /** Shows the given page and highlights the tab that owns it. */
+  function show(name) {
+    pages.forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
+    const ownerTab = SUBPAGE_OWNER[name] ?? name;
+    tabBtns.forEach(t => t.classList.toggle('active', t.dataset.page === ownerTab));
+  }
+
+  // Restore the last top-level tab. Fall back to "home" if the stored value
+  // is missing or stale (e.g. a removed tab from an earlier app version).
+  let savedTab = localStorage.getItem('pwa.tab');
+  if (!TABS.includes(savedTab)) savedTab = 'home';
+  show(savedTab);
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      localStorage.setItem('pwa.tab', btn.dataset.page);
+      show(btn.dataset.page);
+    });
+  });
+
+  // Menu items open a subpage; back buttons return to a tab page.
+  document.querySelectorAll('[data-subpage]').forEach(el => {
+    el.addEventListener('click', () => show(el.dataset.subpage));
+  });
+  document.querySelectorAll('[data-back]').forEach(el => {
+    el.addEventListener('click', () => show(el.dataset.back));
+  });
+}

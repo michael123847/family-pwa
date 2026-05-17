@@ -1,0 +1,350 @@
+/**
+ * todo.js — Shopping / TODO list with full offline support.
+ *
+ * Architecture — three layers:
+ *
+ *  1. Local state (in-memory array `todos`)
+ *     Every change is applied here immediately so the UI always feels instant.
+ *
+ *  2. localStorage cache (`pwa.todos.cache`)
+ *     The local state is written to localStorage after every change. This
+ *     makes the list available the next time the app opens, even offline.
+ *
+ *  3. Pending queue (`pwa.todos.pending`)
+ *     When the local server is not reachable, changes are recorded in a queue
+ *     instead of being discarded. On the next successful connection the queue
+ *     is replayed against the server in order.
+ *
+ * Offline item IDs:
+ *  Items added while offline are assigned a temporary ID with the prefix
+ *  "tmp-" (e.g. "tmp-3f2a..."). When the item is synced to the server the
+ *  real UUID returned by the server replaces the temporary ID everywhere —
+ *  both in the local state and in any pending operations that reference it.
+ *
+ * Optimistic UI:
+ *  All mutations (add, toggle, delete, edit) update the local state and
+ *  re-render immediately, without waiting for the server. If the server call
+ *  fails, the change is added to the pending queue for later sync.
+ */
+
+import { CONFIG } from '../config.js';
+import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { clearToken } from '../auth.js';
+
+// localStorage keys
+const CACHE_KEY   = 'pwa.todos.cache';   // last known list state
+const PENDING_KEY = 'pwa.todos.pending'; // operations waiting to be synced
+
+// In-memory state — always kept in sync with localStorage.
+let todos        = [];
+let pendingQueue = [];
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
+/** Saves the current todo array to localStorage. */
+function saveCache()   { localStorage.setItem(CACHE_KEY,   JSON.stringify(todos)); }
+
+/** Reads the cached todo array from localStorage. Returns [] if nothing is stored. */
+function readCache()   { try { return JSON.parse(localStorage.getItem(CACHE_KEY)   || '[]'); } catch { return []; } }
+
+/** Saves the current pending queue to localStorage. */
+function savePending() { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingQueue)); }
+
+/** Reads the pending queue from localStorage. Returns [] if nothing is stored. */
+function readPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch { return []; } }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Escapes HTML special characters to prevent XSS attacks.
+ * User-supplied text (todo labels) must never be inserted into the DOM as raw
+ * HTML — always escape first.
+ */
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Returns true for items that have not yet been synced to the server. */
+function isTemp(id) { return String(id).startsWith('tmp-'); }
+
+/** Adds an operation to the pending queue and persists it immediately. */
+function enqueue(op) { pendingQueue.push(op); savePending(); }
+
+/**
+ * Shows or hides the offline banner below the add-input field.
+ * When there are pending operations, the banner text shows how many changes
+ * are waiting to be synced.
+ */
+function setOffline(offline) {
+  const banner = document.getElementById('offline-banner');
+  banner.classList.toggle('visible', offline);
+  if (offline) {
+    banner.textContent = pendingQueue.length
+      ? `📵 Offline — ${pendingQueue.length} Änderung${pendingQueue.length !== 1 ? 'en' : ''} wird synchronisiert`
+      : '📵 Nicht im Heim-WLAN — Änderungen werden synchronisiert';
+  }
+}
+
+// ── Raw API ───────────────────────────────────────────────────────────────────
+
+/**
+ * Sends a single HTTP request to the todo API endpoint.
+ * Does NOT fall back to offline — throws on failure so callers can decide
+ * whether to enqueue the operation.
+ *
+ * @param {'GET'|'POST'|'PUT'|'DELETE'} method
+ * @param {object} [body] - Request body (omitted for GET).
+ * @returns {Promise<object|null>} Parsed JSON response, or null for DELETE.
+ */
+async function apiRaw(method, body) {
+  const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_TODO_PATH, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body:    body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'omit', // never send cookies to the local server
+  });
+
+  if (r.status === 401) {
+    // Token was rejected — clear it and reload so auth.js prompts again.
+    clearToken();
+    location.reload();
+  }
+
+  if (!r.ok) {
+    invalidateLocal(); // force a fresh health check on the next call
+    throw new Error('HTTP_' + r.status);
+  }
+
+  return method === 'DELETE' ? null : r.json();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+/**
+ * Re-renders the entire todo list from the current `todos` array.
+ *
+ * Items with a temporary ID (added offline, not yet synced) get the CSS
+ * class "pending" which shows them with a yellow border.
+ *
+ * Event handlers for toggle, delete, and edit are attached via global
+ * window.__todo* functions because the items are rendered as an innerHTML
+ * string, not as live DOM nodes with addEventListener.
+ */
+function render() {
+  const list  = document.getElementById('todo-list');
+  const empty = document.getElementById('todo-empty');
+
+  if (!todos.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.innerHTML = todos.map(item => `
+    <div class="todo-item${item.done ? ' done' : ''}${isTemp(item.id) ? ' pending' : ''}">
+      <span class="todo-text"
+            contenteditable="true" spellcheck="false"
+            onblur="window.__todoEdit('${item.id}',this,'${esc(item.text)}')"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"
+      >${esc(item.text)}</span>
+      <button class="done-btn" onclick="window.__todoToggle('${item.id}',${item.done})">
+        ${item.done ? 'Erledigt' : 'Done'}
+      </button>
+      <button class="del-btn" onclick="window.__todoDelete('${item.id}')" title="Löschen">✕</button>
+    </div>`).join('');
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Replays all pending operations against the server in order.
+ *
+ * ID mapping: when an "add" operation succeeds, the server returns a real UUID.
+ * That UUID is stored in idMap so that subsequent operations on the same item
+ * (toggle, edit, delete) can be sent with the correct ID.
+ *
+ * Operations that fail are kept in the queue for the next sync attempt.
+ * Operations on items with temporary IDs that were never successfully created
+ * are skipped (the server would not know them).
+ */
+async function syncPending() {
+  if (!pendingQueue.length) return;
+
+  const idMap  = {}; // maps tempId → real server-assigned UUID
+  const failed = []; // operations that could not be synced this time
+
+  for (const op of pendingQueue) {
+    // Resolve the ID: if a previous "add" op mapped this temp ID, use the real ID.
+    const id = idMap[op.id] ?? op.id;
+    try {
+      if (op.op === 'add') {
+        const item    = await apiRaw('POST', { text: op.text });
+        idMap[op.id]  = item.id; // remember the mapping for subsequent ops
+        // Update the in-memory list so the temp ID is replaced with the real one.
+        todos = todos.map(t => t.id === op.id ? { ...t, id: item.id } : t);
+        saveCache();
+
+      } else if (op.op === 'toggle') {
+        // Skip if the item still has a temp ID (the add must have failed earlier).
+        if (!isTemp(id)) await apiRaw('PUT', { id, done: op.done });
+
+      } else if (op.op === 'edit') {
+        if (!isTemp(id)) await apiRaw('PUT', { id, text: op.text });
+
+      } else if (op.op === 'delete') {
+        if (!isTemp(id)) await apiRaw('DELETE', { id });
+      }
+    } catch {
+      // Keep the operation with the resolved ID so it can be retried later.
+      failed.push({ ...op, id });
+    }
+  }
+
+  pendingQueue = failed;
+  savePending();
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Loads the todo list. Always called on startup and when the device comes
+ * back online.
+ *
+ * Flow:
+ *  1. Render the cached list immediately so the screen is never empty.
+ *  2. If the local server is reachable: sync pending ops, then fetch fresh data.
+ *  3. If the server is not reachable: show the cached list with the offline banner.
+ */
+async function load() {
+  // Show the cache immediately — avoids a blank list while the health check runs.
+  todos = readCache();
+  render();
+
+  if (await isLocalAvailable()) {
+    await syncPending();
+    try {
+      todos = await apiRaw('GET');
+      saveCache();
+      setOffline(false);
+    } catch {
+      setOffline(true);
+    }
+  } else {
+    setOffline(true);
+  }
+  render();
+}
+
+// ── Mutations ─────────────────────────────────────────────────────────────────
+
+/**
+ * Toggles the done state of a todo item.
+ * Updates locally first, then tries the server. If the server is offline,
+ * the operation is enqueued.
+ */
+window.__todoToggle = async (id, wasDone) => {
+  const newDone = !wasDone;
+  todos = todos.map(t => t.id === id ? { ...t, done: newDone } : t);
+  saveCache();
+  render();
+  if (await isLocalAvailable()) {
+    try { await apiRaw('PUT', { id, done: newDone }); return; } catch {}
+  }
+  enqueue({ op: 'toggle', id, done: newDone });
+  setOffline(true);
+};
+
+/**
+ * Deletes a todo item.
+ * If the item was added offline and has a temp ID, it is simply removed from
+ * the local state and the queue — no server call is needed.
+ */
+window.__todoDelete = async (id) => {
+  todos = todos.filter(t => t.id !== id);
+  saveCache();
+  render();
+
+  if (isTemp(id)) {
+    // The item was never saved to the server — remove all queued ops for it.
+    pendingQueue = pendingQueue.filter(op => op.id !== id);
+    savePending();
+    return;
+  }
+
+  if (await isLocalAvailable()) {
+    try { await apiRaw('DELETE', { id }); return; } catch {}
+  }
+  enqueue({ op: 'delete', id });
+};
+
+/**
+ * Saves an inline edit of a todo item's text.
+ * The contenteditable span calls this on blur (when the user clicks away).
+ * If the user clears the text entirely, the original text is restored.
+ */
+window.__todoEdit = async (id, el, original) => {
+  const text = el.textContent.trim();
+  if (!text) { el.textContent = original; return; }
+  todos = todos.map(t => t.id === id ? { ...t, text } : t);
+  saveCache();
+  if (await isLocalAvailable()) {
+    try { await apiRaw('PUT', { id, text }); return; } catch {}
+  }
+  enqueue({ op: 'edit', id, text });
+};
+
+/**
+ * Adds a new todo item.
+ * A temporary ID is assigned immediately so the item can be rendered and
+ * referenced by subsequent offline operations before the server responds.
+ */
+async function doAdd(text) {
+  text = text.trim();
+  if (!text) return;
+
+  const tempId = 'tmp-' + crypto.randomUUID();
+  todos.unshift({ id: tempId, text, done: false });
+  saveCache();
+  render();
+
+  if (await isLocalAvailable()) {
+    try {
+      const created = await apiRaw('POST', { text });
+      // Replace the temporary ID with the real server-assigned UUID.
+      todos = todos.map(t => t.id === tempId ? { ...t, id: created.id } : t);
+      saveCache();
+      render();
+      return;
+    } catch {}
+  }
+  enqueue({ op: 'add', id: tempId, text });
+  setOffline(true);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Wires up the add-button and input field, then loads the initial list.
+ * Called once by app.js during boot.
+ */
+export function initTodo() {
+  // Restore any pending operations that survived a page reload.
+  pendingQueue = readPending();
+
+  const input = document.getElementById('todo-input');
+  document.getElementById('add-btn').addEventListener('click', () => {
+    doAdd(input.value); input.value = ''; input.focus();
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { doAdd(input.value); input.value = ''; }
+  });
+
+  // When the browser reports it is back online, invalidate the health-check
+  // cache and reload — this triggers a sync of any pending operations.
+  window.addEventListener('online', () => { invalidateLocal(); load(); });
+
+  load();
+}
