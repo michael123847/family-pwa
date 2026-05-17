@@ -194,7 +194,10 @@ async function uploadFiles(fileList) {
     if (!ACCEPTED.includes(file.type)) { skipped++; continue; }
     setStatus(`Lade hoch… (${done + 1}/${files.length})`);
     try {
-      await api('?name=' + encodeURIComponent(file.name), {
+      // ts = the file's own date (capture time for camera photos); the server
+      // builds the stored filename from it.
+      await api('?name=' + encodeURIComponent(file.name)
+                + '&ts=' + (file.lastModified || Date.now()), {
         method:  'POST',
         headers: { 'Content-Type': file.type },
         body:    file,
