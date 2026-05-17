@@ -763,6 +763,42 @@ input[type=range]:active::-webkit-slider-thumb {
   gap: 10px;
   padding-top: 10px;
 }
+
+/* ── Hauschat — ultrasound bar ─────────────────────────────────────── */
+.chat-us-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+.chat-us-btn {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-family: inherit;
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.chat-us-btn:active { transform: scale(0.97); }
+.chat-us-toggle.active,
+#chat-us-toggle.active {
+  background: rgba(77,136,255,0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chat-us-status {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+}
+.chat-us-status.error { color: #ff6b6b; }
+
 .chat-empty {
   text-align: center;
   color: var(--text-dim);

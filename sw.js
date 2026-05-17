@@ -29,9 +29,13 @@
  *  current version's set.
  */
 
-const VERSION   = 'v7';
+const VERSION   = 'v9';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
+
+// Version-independent cache owned by background.js (the family photo).
+// It must survive Service Worker updates, so it is excluded from cleanup.
+const FAMILY_BG = 'family-bg-v1';
 
 // All static files that must be cached during installation.
 // If any file fails to download, the installation is aborted.
@@ -53,35 +57,43 @@ const SHELL_ASSETS = [
   './src/modules/swatch.js',
   './src/modules/photos.js',
   './src/modules/hauschat.js',
+  './src/ultrasound.js',
+];
+
+// Optional assets — cached if present, but their absence does NOT abort the
+// install. The vendored ggwave library lives here (a single self-contained
+// file — the WASM is embedded). Until it is added (see vendor/ggwave/README.md)
+// ultrasound messaging stays disabled.
+const OPTIONAL_ASSETS = [
+  './vendor/ggwave/ggwave.js',
 ];
 
 /**
  * Install event — runs once when the Service Worker is first registered or
- * when VERSION changes. Downloads and caches all shell assets.
- * skipWaiting() makes the new worker take over immediately without waiting
- * for existing tabs to close.
+ * when VERSION changes. Caches all shell assets (mandatory) and then the
+ * optional assets (best-effort — a missing one is ignored).
+ * skipWaiting() makes the new worker take over immediately.
  */
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(APP_SHELL)
-      .then(c => c.addAll(SHELL_ASSETS))
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil((async () => {
+    const cache = await caches.open(APP_SHELL);
+    await cache.addAll(SHELL_ASSETS);
+    await Promise.allSettled(OPTIONAL_ASSETS.map(a => cache.add(a)));
+    await self.skipWaiting();
+  })());
 });
 
 /**
  * Activate event — runs after the new Service Worker takes over.
- * Deletes all caches that do not belong to the current version, freeing
- * storage space left by older versions.
- * clients.claim() makes the worker control existing open tabs immediately.
+ * Deletes old version caches, but keeps the current shell, runtime and the
+ * family photo cache. clients.claim() makes the worker control open tabs.
  */
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
+    const keep = [APP_SHELL, RUNTIME, FAMILY_BG];
     const keys = await caches.keys();
     await Promise.all(
-      keys
-        .filter(k => k !== APP_SHELL && k !== RUNTIME) // keep only current version
-        .map(k => caches.delete(k))
+      keys.filter(k => !keep.includes(k)).map(k => caches.delete(k))
     );
     self.clients.claim();
   })());
@@ -103,10 +115,18 @@ self.addEventListener('fetch', e => {
 
   // ── App shell ─────────────────────────────────────────────────────────
   // Requests to the same origin as the app (GitHub Pages) = static files.
-  // Serve from cache immediately; fetch from network only if not cached.
+  // Serve from cache; on a cache miss fetch from network AND store the result,
+  // so assets added after install (e.g. the ggwave files) become available
+  // offline once they have been loaded once.
   if (url.origin === self.location.origin) {
     e.respondWith(
-      caches.match(e.request).then(r => r || fetch(e.request))
+      caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
+        if (resp.ok) {
+          const copy = resp.clone();
+          caches.open(APP_SHELL).then(c => c.put(e.request, copy));
+        }
+        return resp;
+      }))
     );
     return;
   }
