@@ -70,46 +70,41 @@ async function updateLocalStatus() {
   el.title = online ? 'Local server: Online' : 'Local server: Offline';
 }
 
-// Top-level tabs in the bottom bar. Each one has a matching page div
-// (data-page="todo" → id="page-todo").
-const TABS = ['home', 'todo', 'photos', 'diverses'];
-
-// Subpages are not tabs — they are opened from a menu (e.g. the colour
-// picker from the "Diverses" menu). The value is the tab that stays
+// Subpages are opened from a menu rather than the tab bar (the colour picker
+// and Hauschat, from the "Diverses" menu). The value is the tab that stays
 // highlighted while the subpage is open.
-const SUBPAGE_OWNER = { color: 'diverses' };
+const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses' };
 
 /**
  * Sets up the bottom tab bar and the subpage navigation.
  *
  * Tab buttons (.tab-btn[data-page]) switch between the top-level pages.
  * Menu items ([data-subpage]) open a subpage. Back buttons ([data-back])
- * return from a subpage to its owning tab page. The last top-level tab is
- * stored in localStorage so the user lands on it again after a reload;
- * subpages are never restored.
+ * return from a subpage to its owning tab page. The current page — tab OR
+ * subpage — is stored in localStorage, so a reload restores exactly where
+ * the user was (e.g. inside the colour picker, not the Diverses menu).
  */
 function initTabs() {
   const tabBtns = document.querySelectorAll('.tab-btn');
   const pages   = document.querySelectorAll('.page');
 
-  /** Shows the given page and highlights the tab that owns it. */
+  /** Shows the given page, highlights its owning tab, and remembers it. */
   function show(name) {
     pages.forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
     const ownerTab = SUBPAGE_OWNER[name] ?? name;
     tabBtns.forEach(t => t.classList.toggle('active', t.dataset.page === ownerTab));
+    localStorage.setItem('pwa.page', name);
   }
 
-  // Restore the last top-level tab. Fall back to "home" if the stored value
-  // is missing or stale (e.g. a removed tab from an earlier app version).
-  let savedTab = localStorage.getItem('pwa.tab');
-  if (!TABS.includes(savedTab)) savedTab = 'home';
-  show(savedTab);
+  // Restore the page the user last had open (tab or subpage). 'pwa.tab' is
+  // the older key, kept so existing installs migrate cleanly. Falls back to
+  // "home" if the stored page no longer exists.
+  let saved = localStorage.getItem('pwa.page') || localStorage.getItem('pwa.tab') || 'home';
+  if (!document.getElementById('page-' + saved)) saved = 'home';
+  show(saved);
 
   tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      localStorage.setItem('pwa.tab', btn.dataset.page);
-      show(btn.dataset.page);
-    });
+    btn.addEventListener('click', () => show(btn.dataset.page));
   });
 
   // Menu items open a subpage; back buttons return to a tab page.
