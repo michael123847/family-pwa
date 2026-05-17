@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#462C57">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/180.png">
+  <link rel="stylesheet" href="style.css">
+  <title>Info App</title>
+</head>
+<body>
+
+  <!-- ── HOME ─────────────────────────────────────────────────────── -->
+  <div id="page-home" class="page active">
+    <div class="section-label section-label-row">
+      <span>Info App · <a href="setup/" style="color:var(--accent);text-decoration:none;font-size:.85em">Setup</a></span>
+      <span id="local-status" class="local-status" title="Lokaler Server"></span>
+    </div>
+
+    <div id="family-bg" class="family-photo" role="img" aria-label="Familienbild"></div>
+
+    <p class="section-label" id="weather-label" style="margin-top:24px">Wetter</p>
+    <div class="weather-card" id="weather-card">
+      <div class="w-state">Wetterdaten werden geladen…</div>
+    </div>
+
+    <p class="section-label" style="margin-top:24px">Nächste Abfahrten</p>
+    <div id="transit-container">
+      <div class="w-state" style="padding:16px;background:var(--card);border:1px solid var(--card-border);border-radius:18px">
+        Abfahrten werden geladen…
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TODO ──────────────────────────────────────────────────────── -->
+  <div id="page-todo" class="page">
+    <p class="section-label">TODO-Liste</p>
+    <div class="todo-add">
+      <input type="text" class="todo-input" id="todo-input"
+             placeholder="Neuer Eintrag…" autocomplete="off">
+      <button class="add-btn" id="add-btn" aria-label="Hinzufügen">+</button>
+    </div>
+    <div class="offline-banner" id="offline-banner">
+      📵 Nicht im Heim-WLAN — TODO-Liste nicht verfügbar
+    </div>
+    <div class="todo-list" id="todo-list"></div>
+    <div class="todo-empty" id="todo-empty">Keine Einträge — füge deinen ersten hinzu!</div>
+    <div class="todo-error" id="todo-error" style="display:none"></div>
+  </div>
+
+  <!-- ── DIVERSES (Menü) ───────────────────────────────────────────── -->
+  <div id="page-diverses" class="page">
+    <p class="section-label">Diverses</p>
+    <div class="menu-list">
+      <button class="menu-item" data-subpage="color">
+        <span class="menu-icon">🎨</span>
+        <span class="menu-label">Farbe</span>
+        <span class="menu-chevron">›</span>
+      </button>
+      <button class="menu-item" data-subpage="hauschat">
+        <span class="menu-icon">💬</span>
+        <span class="menu-label">Hauschat</span>
+        <span class="menu-chevron">›</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── COLOR PICKER (Unterseite von Diverses) ────────────────────── -->
+  <div id="page-color" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+    <div class="cp-wrap">
+    <div class="cp-card">
+      <h1>Color Picker</h1>
+      <div class="hex-display">
+        <input class="hex-value" id="hex-out" value="#8000C8"
+               maxlength="7" spellcheck="false" autocomplete="off" autocorrect="off">
+      </div>
+      <div class="rgb-values">
+        <div class="rgb-badge">
+          <span class="label">R</span>
+          <input class="val" id="rv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="128" autocomplete="off">
+        </div>
+        <div class="rgb-badge">
+          <span class="label">G</span>
+          <input class="val" id="gv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="0" autocomplete="off">
+        </div>
+        <div class="rgb-badge">
+          <span class="label">B</span>
+          <input class="val" id="bv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="200" autocomplete="off">
+        </div>
+      </div>
+      <div class="slider-group">
+        <div class="slider-row red">
+          <span class="slider-label">Rot</span>
+          <input type="range" id="r" min="0" max="255" value="128">
+        </div>
+        <div class="slider-row green">
+          <span class="slider-label">Grün</span>
+          <input type="range" id="g" min="0" max="255" value="0">
+        </div>
+        <div class="slider-row blue">
+          <span class="slider-label">Blau</span>
+          <input type="range" id="b" min="0" max="255" value="200">
+        </div>
+      </div>
+      <div class="harmony-selector" id="harmony-selector">
+        <button class="harmony-btn active" data-harmony="analogous">Analog</button>
+        <button class="harmony-btn" data-harmony="complementary">Komplem.</button>
+        <button class="harmony-btn" data-harmony="triadic">Triadisch</button>
+        <button class="harmony-btn" data-harmony="square">Quadrat.</button>
+        <button class="harmony-btn" data-harmony="split">Split</button>
+      </div>
+      <div class="cp-swatches" id="cp-swatches"></div>
+      <button class="copy-btn" id="copy-btn">HEX kopieren</button>
+    </div>
+    </div>
+  </div>
+
+  <!-- ── HAUSCHAT (Unterseite von Diverses) ────────────────────────── -->
+  <div id="page-hauschat" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+
+    <div class="chat-setup" id="chat-setup" style="display:none">
+      <p class="section-label">Name wählen</p>
+      <p class="chat-setup-hint">Wie sollen dich die anderen im Hauschat sehen?</p>
+      <input type="text" class="todo-input" id="chat-name-input"
+             placeholder="Dein Name…" maxlength="24" autocomplete="off">
+      <button class="photo-upload-btn" id="chat-name-save">Speichern</button>
+    </div>
+
+    <div class="chat-view" id="chat-view" style="display:none">
+      <div class="chat-messages" id="chat-messages"></div>
+      <div class="chat-offline" id="chat-offline">
+        📵 Server nicht erreichbar — Nachrichten werden später gesendet
+      </div>
+      <div class="chat-input-row">
+        <input type="text" class="todo-input" id="chat-input"
+               placeholder="Nachricht…" maxlength="1000" autocomplete="off">
+        <button class="add-btn" id="chat-send" aria-label="Senden">→</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PHOTOS ────────────────────────────────────────────────────── -->
+  <div id="page-photos" class="page">
+    <p class="section-label">Foto-Galerie</p>
+    <div class="photo-actions">
+      <button class="photo-upload-btn" id="photo-upload-btn">+ Foto hochladen</button>
+      <input type="file" id="photo-input"
+             accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+    </div>
+    <div class="offline-banner" id="photo-offline-banner">
+      📵 Nicht im Heim-WLAN — Galerie nicht verfügbar
+    </div>
+    <div class="photo-status" id="photo-status"></div>
+    <div class="photo-grid" id="photo-grid"></div>
+    <div class="photo-empty" id="photo-empty">Noch keine Fotos — lade dein erstes hoch!</div>
+  </div>
+
+  <!-- ── TAB BAR ───────────────────────────────────────────────────── -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-page="home">
+      <span class="tab-icon">🏠</span>
+      <span>Home</span>
+    </button>
+    <button class="tab-btn" data-page="todo">
+      <span class="tab-icon">✅</span>
+      <span>TODO</span>
+      <span class="sync-badge" id="sync-badge"></span>
+    </button>
+    <button class="tab-btn" data-page="photos">
+      <span class="tab-icon">📷</span>
+      <span>Fotos</span>
+    </button>
+    <button class="tab-btn" data-page="diverses">
+      <span class="tab-icon">⚙️</span>
+      <span>Diverses</span>
+    </button>
+  </nav>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
