@@ -12,6 +12,12 @@
 
 export const CONFIG = {
 
+  // ── App version ────────────────────────────────────────────────────
+  // Shown in the Info subapp so it is easy to verify which build a device
+  // is really running. Bump this together with VERSION in sw.js on every
+  // deploy — they should always match.
+  APP_VERSION: 'v14',
+
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
   // Only reachable when the device is connected to the home WiFi.

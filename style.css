@@ -806,6 +806,49 @@ input[type=range]:active::-webkit-slider-thumb {
   padding: 40px 20px;
 }
 
+/* ── Info subpage ─────────────────────────────────────────────────── */
+.info-list {
+  margin-top: 14px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 0.9rem;
+}
+.info-row:last-child { border-bottom: none; }
+.info-label { color: var(--text-dim); flex-shrink: 0; }
+.info-value { font-weight: 600; text-align: right; word-break: break-word; }
+.info-value.good { color: var(--green); }
+.info-value.warn { color: #ffb800; }
+.info-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.info-btn {
+  flex: 1;
+  min-width: 140px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 11px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.info-btn:active { transform: scale(0.98); }
+.info-btn-warn { color: #ffb800; border-color: rgba(255,180,0,0.3); }
+
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
   position: fixed;
