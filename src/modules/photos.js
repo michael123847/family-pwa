@@ -278,7 +278,7 @@ async function uploadFiles(fileList) {
       // Prefer the EXIF capture date (reliable on both iOS and Android).
       // Android's file picker often sets lastModified to the share time rather
       // than the photo's actual capture time — EXIF tag 0x9003 is the fix.
-      const ts = (await readJpegCaptureDateMs(file)) ?? file.lastModified || Date.now();
+      const ts = (await readJpegCaptureDateMs(file)) ?? (file.lastModified || Date.now());
       await api('?name=' + encodeURIComponent(file.name)
                 + '&ts=' + ts, {
         method:  'POST',
