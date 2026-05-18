@@ -29,7 +29,7 @@
  *  current version's set.
  */
 
-const VERSION   = 'v10';
+const VERSION   = 'v13';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 
@@ -58,6 +58,7 @@ const SHELL_ASSETS = [
   './src/modules/photos.js',
   './src/modules/hauschat.js',
   './src/ultrasound.js',
+  './src/ultrasoundChannel.js',
 ];
 
 // Optional assets — cached if present, but their absence does NOT abort the

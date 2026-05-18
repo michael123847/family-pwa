@@ -6,7 +6,9 @@
  *    which keeps them for 48 hours. The chat syncs while the subpage is open.
  *  - Ultrasound (Phase 2): when ultrasound mode is on, sending also emits the
  *    message as sound and the microphone decodes incoming ones — works with
- *    no network at all (foreign WiFi, aeroplane). See ultrasound.js.
+ *    no network at all (foreign WiFi, aeroplane). The reusable transport is
+ *    UltrasoundChannel (ultrasoundChannel.js); this module only adds the
+ *    Hauschat-specific envelope format and UI wiring.
  *
  * There is no background delivery: the chat syncs while the Hauschat subpage
  * is open (an immediate sync on open, then a poll every few seconds).
@@ -31,10 +33,7 @@
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
 import { clearToken } from '../auth.js';
-import {
-  transmit, startListening, stopListening, isListening,
-  isUltrasoundAvailable, MAX_PAYLOAD_BYTES,
-} from '../ultrasound.js';
+import { UltrasoundChannel } from '../ultrasoundChannel.js';
 
 const CHAT_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_CHAT_PATH;
 const DB_NAME  = 'hauschat';
@@ -49,8 +48,7 @@ let messages = [];     // in-memory copy of all known messages
 let cursor   = 0;      // highest server seq fetched so far
 let syncing  = false;  // guard against overlapping sync() calls
 
-let ultrasoundOn = false; // user has switched ultrasound messaging on
-let audible      = false; // false = ultrasound protocol, true = audible protocol
+let channel = null; // UltrasoundChannel — the reusable sound transport
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
@@ -140,11 +138,6 @@ function setUsStatus(text, isError = false) {
   if (!el) return;
   el.textContent = text;
   el.classList.toggle('error', isError);
-}
-
-/** Sets the resting ultrasound status (listening, or blank when off). */
-function usIdleStatus() {
-  setUsStatus(ultrasoundOn ? (audible ? '🔊 hörbar · hört zu' : '📡 hört zu') : '');
 }
 
 /** Packs a message into the compact wire format sent over sound. */
@@ -255,13 +248,13 @@ async function send() {
     ts:         Date.now(),
     status:     'pending',
   };
-  if (ultrasoundOn) msg.via = 'ultrasound';
+  if (channel?.enabled) msg.via = 'ultrasound';
   messages.push(msg);
   await idbPut('messages', msg);
   input.value = '';
   render();
-  if (ultrasoundOn) transmitMessage(msg); // also emit as sound
-  sync();                                 // still queues for the server
+  if (channel?.enabled) transmitMessage(msg); // also emit as sound
+  sync();                                     // still queues for the server
 }
 
 /**
@@ -271,18 +264,11 @@ async function send() {
  */
 async function transmitMessage(msg) {
   const envelope = encodeEnvelope(msg);
-  if (new TextEncoder().encode(envelope).length > MAX_PAYLOAD_BYTES) {
+  if (new TextEncoder().encode(envelope).length > channel.maxBytes) {
     setUsStatus('⚠️ Zu lang für Ultraschall — nur über Server', true);
     return;
   }
-  setUsStatus('🔊 sende…');
-  try {
-    await transmit(envelope, { audible });
-  } catch {
-    setUsStatus('⚠️ Senden fehlgeschlagen', true);
-    return;
-  }
-  usIdleStatus();
+  await channel.send(envelope); // the channel reports its own status
 }
 
 /**
@@ -325,45 +311,26 @@ async function saveName() {
   sync();
 }
 
-/**
- * Switches ultrasound messaging on or off. "On" starts listening on the
- * microphone (asks for permission) and makes sending also emit sound.
- */
-async function toggleUltrasound() {
+/** Updates the ultrasound buttons to reflect the channel's current state. */
+function syncUsUi() {
   const btn  = document.getElementById('chat-us-toggle');
   const freq = document.getElementById('chat-us-freq');
+  btn.classList.toggle('active', channel.enabled);
+  btn.textContent  = channel.enabled ? '📡 Ultraschall an' : '📡 Ultraschall';
+  freq.hidden      = !channel.enabled;
+  freq.textContent = channel.audible ? 'Modus: hörbar' : 'Modus: Ultraschall';
+}
 
-  if (ultrasoundOn) {
-    stopListening();
-    ultrasoundOn = false;
-    btn.classList.remove('active');
-    btn.textContent = '📡 Ultraschall';
-    freq.hidden = true;
-    setUsStatus('');
-    return;
-  }
-
-  setUsStatus('⏳ Mikrofon…');
-  try {
-    await startListening(onUltrasoundMessage);
-  } catch {
-    setUsStatus('⚠️ Ultraschall nicht verfügbar', true);
-    return;
-  }
-  ultrasoundOn = true;
-  btn.classList.add('active');
-  btn.textContent = '📡 Ultraschall an';
-  freq.hidden = false;
-  usIdleStatus();
+/** Switches ultrasound messaging on or off (microphone listening + sending). */
+async function toggleUltrasound() {
+  await channel.toggle();
+  syncUsUi();
 }
 
 /** Flips the send protocol between ultrasound and audible. */
 function toggleFreq() {
-  audible = !audible;
-  localStorage.setItem('hauschat.audible', audible ? '1' : '0');
-  document.getElementById('chat-us-freq').textContent =
-    audible ? 'Modus: hörbar' : 'Modus: Ultraschall';
-  usIdleStatus();
+  channel.setMode(!channel.audible);
+  syncUsUi();
 }
 
 // ── View toggle ───────────────────────────────────────────────────────────────
@@ -404,23 +371,19 @@ export async function initHauschat() {
     if (e.key === 'Enter') saveName();
   });
 
-  // Ultrasound controls — the whole bar is hidden if ggwave is unavailable.
-  audible = localStorage.getItem('hauschat.audible') === '1';
-  if (await isUltrasoundAvailable()) {
+  // Ultrasound — create the reusable channel; hide the bar if unavailable.
+  channel = new UltrasoundChannel({
+    name:      'hauschat',
+    onMessage: onUltrasoundMessage,
+    onStatus:  setUsStatus,
+  });
+  if (await channel.available()) {
     document.getElementById('chat-us-toggle').addEventListener('click', toggleUltrasound);
-    const freq = document.getElementById('chat-us-freq');
-    freq.addEventListener('click', toggleFreq);
-    freq.textContent = audible ? 'Modus: hörbar' : 'Modus: Ultraschall';
+    document.getElementById('chat-us-freq').addEventListener('click', toggleFreq);
+    syncUsUi();
   } else {
     document.getElementById('chat-us-bar').hidden = true;
   }
-
-  // Release the microphone while the app is in the background.
-  document.addEventListener('visibilitychange', () => {
-    if (!ultrasoundOn) return;
-    if (document.hidden) stopListening();
-    else if (!isListening()) startListening(onUltrasoundMessage).catch(() => {});
-  });
 
   if (device) showChat();
   else        showSetup();
