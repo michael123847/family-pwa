@@ -848,6 +848,53 @@ input[type=range]:active::-webkit-slider-thumb {
 .info-btn:active { transform: scale(0.98); }
 .info-btn-warn { color: #ffb800; border-color: rgba(255,180,0,0.3); }
 
+/* ── Audiotest subpage ────────────────────────────────────────────── */
+.audiotest-hint {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 12px 0;
+}
+.audiotest-mode-row { margin-bottom: 12px; }
+.audiotest-run-btn {
+  width: 100%;
+  background: var(--accent);
+  border: none;
+  border-radius: 12px;
+  padding: 14px;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.audiotest-run-btn:disabled { opacity: 0.5; cursor: default; }
+.audiotest-run-btn:active:not(:disabled) { transform: scale(0.98); }
+.audiotest-meter {
+  height: 14px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+.audiotest-meter-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(to right, var(--green), #ffb800, #ff6b6b);
+  transition: width 0.05s linear;
+}
+.audiotest-status {
+  margin-top: 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+.audiotest-status.ok    { color: var(--green); }
+.audiotest-status.warn  { color: #ffb800; }
+.audiotest-status.error { color: #ff6b6b; }
+
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
   position: fixed;

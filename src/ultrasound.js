@@ -133,13 +133,22 @@ export async function transmit(text, { audible = false } = {}) {
  * NotFoundError — the caller maps these to a clear message.
  *
  * @param {(text: string) => void} onMessage
+ * @param {object}   [opts]
+ * @param {(level: number) => void} [opts.onLevel] - called every audio frame
+ *        with the peak amplitude (0..1) of that frame — for a level meter.
+ * @param {boolean}  [opts.disableProcessing] - if true, opens the microphone
+ *        with echo cancellation / noise suppression / auto gain OFF. Those
+ *        would fight a data-over-sound signal — needed for the loopback test.
  */
-export async function startListening(onMessage) {
+export async function startListening(onMessage, { onLevel, disableProcessing = false } = {}) {
   if (listening) return;
   ensureContext();
 
   // 1. Microphone — this triggers the permission prompt.
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const audioConstraints = disableProcessing
+    ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    : true;
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
 
   // 2. ggwave + audio graph. On any failure, release the microphone again.
   try {
@@ -154,6 +163,14 @@ export async function startListening(onMessage) {
     recorder  = ctx.createScriptProcessor(1024, 1, 1);
     recorder.onaudioprocess = e => {
       const samples = new Float32Array(e.inputBuffer.getChannelData(0));
+      if (onLevel) {
+        let peak = 0;
+        for (let i = 0; i < samples.length; i++) {
+          const a = Math.abs(samples[i]);
+          if (a > peak) peak = a;
+        }
+        onLevel(peak); // peak amplitude (0..1) of this audio frame
+      }
       const res = ggwave.decode(instance, convertTypedArray(samples, Int8Array));
       if (res && res.length > 0) {
         try { onMessage(new TextDecoder('utf-8').decode(res)); } catch { /* garbled */ }
