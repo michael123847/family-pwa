@@ -33,9 +33,13 @@ import {
 function errorText(e) {
   const name = e && e.name;
   if (name === 'NotAllowedError' || name === 'SecurityError')
-    return '⚠️ Mikrofon-Zugriff verweigert — im Browser erlauben';
-  if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'NotReadableError')
+    return '⚠️ Mikrofon-Zugriff verweigert — im Browser/System erlauben';
+  if (name === 'NotFoundError')
     return '⚠️ Kein Mikrofon gefunden';
+  if (name === 'NotReadableError')
+    return '⚠️ Mikrofon belegt oder vom System blockiert';
+  if (name === 'OverconstrainedError')
+    return '⚠️ Mikrofon nicht nutzbar';
   if (e && /ggwave/i.test(e.message || ''))
     return '⚠️ Ultraschall-Bibliothek nicht geladen';
   return '⚠️ Ultraschall: ' + ((e && e.message) || e);

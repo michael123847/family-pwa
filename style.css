@@ -784,7 +784,6 @@ input[type=range]:active::-webkit-slider-thumb {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .chat-us-btn:active { transform: scale(0.97); }
-.chat-us-toggle.active,
 #chat-us-toggle.active {
   background: rgba(77,136,255,0.18);
   border-color: var(--accent);
