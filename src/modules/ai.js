@@ -64,6 +64,11 @@ function render() {
   list.innerHTML = history.map(m => `
     <div class="ai-msg ai-msg-${m.role}">
       <div class="ai-bubble">${m.content ? fmt(m.content) : '<span class="ai-cursor">▍</span>'}</div>
+      ${m.content ? `<button class="ai-copy-btn" title="Kopieren" onclick="
+        navigator.clipboard.writeText(${JSON.stringify(m.content)}).then(()=>{
+          const b=this;b.textContent='✓';setTimeout(()=>b.textContent='⎘',1200);
+        });
+      ">⎘</button>` : ''}
     </div>`).join('') +
     (thinking
       ? '<div class="ai-msg ai-msg-assistant"><div class="ai-bubble"><span class="ai-cursor">▍</span></div></div>'
@@ -157,12 +162,6 @@ export function initAi() {
 
   document.getElementById('ai-send').addEventListener('click', () => {
     const t = input.value; input.value = ''; send(t);
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      const t = input.value; input.value = ''; send(t);
-    }
   });
 
   document.getElementById('ai-clear').addEventListener('click', () => {
