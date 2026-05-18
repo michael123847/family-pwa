@@ -48,7 +48,8 @@ let messages = [];     // in-memory copy of all known messages
 let cursor   = 0;      // highest server seq fetched so far
 let syncing  = false;  // guard against overlapping sync() calls
 
-let channel = null; // UltrasoundChannel — the reusable sound transport
+let channel     = null;  // UltrasoundChannel — the reusable sound transport
+let usAvailable = false; // whether ggwave/microphone are usable on this device
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
@@ -333,6 +334,22 @@ function toggleFreq() {
   syncUsUi();
 }
 
+/**
+ * Shows the ultrasound bar only when ggwave is available AND the home server
+ * is unreachable — ultrasound is the no-server fallback, so it is hidden while
+ * the server works. When the server comes back, an active session is stopped.
+ */
+function applyUsVisibility(serverOnline) {
+  const bar = document.getElementById('chat-us-bar');
+  if (!bar) return;
+  if (usAvailable && !serverOnline) {
+    bar.hidden = false;
+  } else {
+    if (channel && channel.enabled) { channel.disable(); syncUsUi(); }
+    bar.hidden = true;
+  }
+}
+
 // ── View toggle ───────────────────────────────────────────────────────────────
 
 function showSetup() {
@@ -371,19 +388,21 @@ export async function initHauschat() {
     if (e.key === 'Enter') saveName();
   });
 
-  // Ultrasound — create the reusable channel; hide the bar if unavailable.
+  // Ultrasound — create the reusable channel. The bar is shown only while the
+  // home server is unreachable (handled by the pwa:server listener below).
   channel = new UltrasoundChannel({
     name:      'hauschat',
     onMessage: onUltrasoundMessage,
     onStatus:  setUsStatus,
   });
-  if (await channel.available()) {
+  usAvailable = await channel.available();
+  if (usAvailable) {
     document.getElementById('chat-us-toggle').addEventListener('click', toggleUltrasound);
     document.getElementById('chat-us-freq').addEventListener('click', toggleFreq);
     syncUsUi();
-  } else {
-    document.getElementById('chat-us-bar').hidden = true;
   }
+  document.getElementById('chat-us-bar').hidden = true; // until the server status is known
+  window.addEventListener('pwa:server', e => applyUsVisibility(e.detail));
 
   if (device) showChat();
   else        showSetup();
