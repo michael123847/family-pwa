@@ -85,7 +85,11 @@ export class UltrasoundChannel {
     if (this.enabled) return;
     this._onStatus('⏳ Mikrofon…', false);
     try {
-      await startListening(text => this._onMessage(text));
+      // disableProcessing: open the mic without echo cancellation / noise
+      // suppression / auto gain. Those filter out the data-over-sound signal —
+      // verified via the Audiotest subapp: with them ON, ultrasound reception
+      // fails on most devices; with them OFF it works on Chrome, Android, iOS.
+      await startListening(text => this._onMessage(text), { disableProcessing: true });
     } catch (e) {
       console.error('[UltrasoundChannel] enable failed:', e);
       this._onStatus(errorText(e), true);
@@ -152,7 +156,7 @@ export class UltrasoundChannel {
     if (document.hidden) {
       stopListening();
     } else if (!isListening()) {
-      startListening(text => this._onMessage(text)).catch(() => {});
+      startListening(text => this._onMessage(text), { disableProcessing: true }).catch(() => {});
     }
   }
 }
