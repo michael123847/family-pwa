@@ -747,6 +747,22 @@ input[type=range]:active::-webkit-slider-thumb {
   color: var(--text-dim);
   margin: 3px 6px 0;
 }
+.chat-copy-btn {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 1px 6px;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  line-height: 1.6;
+  align-self: flex-end;
+}
+.chat-msg.mine .chat-copy-btn { align-self: flex-end; }
+.chat-msg.theirs .chat-copy-btn { align-self: flex-start; }
+.chat-msg:hover .chat-copy-btn { opacity: 1; }
 .chat-offline {
   display: none;
   text-align: center;

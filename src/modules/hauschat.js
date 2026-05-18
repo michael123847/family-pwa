@@ -170,7 +170,7 @@ function render() {
 
   messages.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
 
-  box.innerHTML = messages.map(m => {
+  box.innerHTML = messages.map((m, i) => {
     const mine = m.sender === device?.id;
     const time = new Date(m.ts).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
     const tick = !mine ? '' : (m.status === 'pending' ? '🕓' : '✓');
@@ -179,8 +179,19 @@ function render() {
       ${mine ? '' : `<span class="chat-author">${esc(m.senderName || '?')}</span>`}
       <span class="chat-bubble">${esc(m.text)}</span>
       <span class="chat-meta">${time}${via}${mine ? ' ' + tick : ''}</span>
+      <button class="chat-copy-btn" data-idx="${i}" title="Kopieren">⎘</button>
     </div>`;
   }).join('');
+
+  box.querySelectorAll('.chat-copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = messages[Number(btn.dataset.idx)]?.text ?? '';
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = '⎘', 1200);
+      });
+    });
+  });
 
   box.scrollTop = box.scrollHeight; // keep the newest message in view
 }
