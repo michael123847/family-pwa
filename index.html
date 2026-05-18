@@ -47,6 +47,11 @@
              placeholder="Neuer Eintrag…" autocomplete="off">
       <button class="add-btn" id="add-btn" aria-label="Hinzufügen">+</button>
     </div>
+    <div class="us-bar" id="todo-us-bar">
+      <button class="us-btn" id="todo-us-toggle">📡 Ultraschall</button>
+      <button class="us-btn us-freq" id="todo-us-freq" hidden>Modus: Ultraschall</button>
+      <span class="us-status" id="todo-us-status"></span>
+    </div>
     <div class="offline-banner" id="offline-banner">
       📵 Nicht im Heim-WLAN — TODO-Liste nicht verfügbar
     </div>
@@ -178,10 +183,10 @@
       <div class="chat-offline" id="chat-offline">
         📵 Server nicht erreichbar — Nachrichten werden später gesendet
       </div>
-      <div class="chat-us-bar" id="chat-us-bar">
-        <button class="chat-us-btn" id="chat-us-toggle">📡 Ultraschall</button>
-        <button class="chat-us-btn chat-us-freq" id="chat-us-freq" hidden>Modus: Ultraschall</button>
-        <span class="chat-us-status" id="chat-us-status"></span>
+      <div class="us-bar" id="chat-us-bar">
+        <button class="us-btn" id="chat-us-toggle">📡 Ultraschall</button>
+        <button class="us-btn us-freq" id="chat-us-freq" hidden>Modus: Ultraschall</button>
+        <span class="us-status" id="chat-us-status"></span>
       </div>
       <div class="chat-input-row">
         <input type="text" class="todo-input" id="chat-input"
