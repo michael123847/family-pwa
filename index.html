@@ -74,6 +74,11 @@
         <span class="menu-label">Hauschat</span>
         <span class="menu-chevron">›</span>
       </button>
+      <button class="menu-item" data-subpage="ai">
+        <span class="menu-icon">🤖</span>
+        <span class="menu-label">KI-Assistent</span>
+        <span class="menu-chevron">›</span>
+      </button>
       <button class="menu-item" data-subpage="info">
         <span class="menu-icon">ℹ️</span>
         <span class="menu-label">Info</span>
@@ -155,6 +160,26 @@
       <button class="copy-btn" id="copy-btn">HEX kopieren</button>
     </div>
     </div>
+  </div>
+
+  <!-- ── KI-ASSISTENT (Unterseite von Diverses) ───────────────────── -->
+  <div id="page-ai" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+    <p class="section-label">KI-Assistent · Qwen 2.5</p>
+
+    <div class="offline-banner" id="ai-offline">
+      📵 Server nicht erreichbar — KI nicht verfügbar
+    </div>
+
+    <div class="ai-messages" id="ai-messages"></div>
+
+    <div class="ai-input-row">
+      <input type="text" class="todo-input" id="ai-input"
+             placeholder="Frage stellen…" maxlength="2000"
+             autocomplete="off" autocorrect="off">
+      <button class="add-btn" id="ai-send" aria-label="Senden">→</button>
+    </div>
+    <button class="ai-clear-btn" id="ai-clear">Gespräch löschen</button>
   </div>
 
   <!-- ── HAUSCHAT (Unterseite von Diverses) ────────────────────────── -->
