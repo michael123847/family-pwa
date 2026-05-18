@@ -74,6 +74,11 @@
         <span class="menu-label">Info</span>
         <span class="menu-chevron">›</span>
       </button>
+      <button class="menu-item" data-subpage="audiotest">
+        <span class="menu-icon">🔊</span>
+        <span class="menu-label">Audiotest</span>
+        <span class="menu-chevron">›</span>
+      </button>
     </div>
   </div>
 
@@ -86,6 +91,23 @@
       <button class="info-btn" id="info-refresh">Aktualisieren</button>
       <button class="info-btn info-btn-warn" id="info-reload">Cache leeren &amp; neu laden</button>
     </div>
+  </div>
+
+  <!-- ── AUDIOTEST (Unterseite von Diverses) ───────────────────────── -->
+  <div id="page-audiotest" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+    <p class="section-label">Audiotest</p>
+    <p class="audiotest-hint">
+      Spielt ein Testsignal über den Lautsprecher ab und versucht, es mit dem
+      Mikrofon desselben Geräts wieder zu empfangen. Prüft Lautsprecher und
+      Mikrofon — auf jedem Gerät einzeln ausführbar.
+    </p>
+    <div class="audiotest-mode-row">
+      <button class="info-btn" id="audiotest-mode">Modus: Ultraschall</button>
+    </div>
+    <button class="audiotest-run-btn" id="audiotest-run">Test starten</button>
+    <div class="audiotest-meter"><div class="audiotest-meter-fill" id="audiotest-meter-fill"></div></div>
+    <div class="audiotest-status" id="audiotest-status">Bereit.</div>
   </div>
 
   <!-- ── COLOR PICKER (Unterseite von Diverses) ────────────────────── -->

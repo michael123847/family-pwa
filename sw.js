@@ -31,7 +31,7 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v16';
+const VERSION   = 'v17';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 
@@ -60,6 +60,7 @@ const SHELL_ASSETS = [
   './src/modules/photos.js',
   './src/modules/hauschat.js',
   './src/modules/info.js',
+  './src/modules/audiotest.js',
   './src/ultrasound.js',
   './src/ultrasoundChannel.js',
 ];
