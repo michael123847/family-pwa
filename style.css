@@ -981,12 +981,11 @@ input[type=range]:active::-webkit-slider-thumb {
   font-size: 0.8rem;
   padding: 1px 6px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.35;
   transition: opacity 0.15s;
   line-height: 1.6;
 }
 .ai-msg:hover .ai-copy-btn { opacity: 1; }
-.ai-msg-user .ai-copy-btn  { right: 0; }
 
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
