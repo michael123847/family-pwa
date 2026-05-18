@@ -969,6 +969,25 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 .ai-clear-btn:hover { background: var(--card); }
 
+.ai-msg { position: relative; }
+.ai-copy-btn {
+  position: absolute;
+  bottom: -4px;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 1px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  line-height: 1.6;
+}
+.ai-msg:hover .ai-copy-btn { opacity: 1; }
+.ai-msg-user .ai-copy-btn  { right: 0; }
+
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
   position: fixed;
