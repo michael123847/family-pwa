@@ -19,6 +19,7 @@ import { initPhotos }          from './modules/photos.js';
 import { initHauschat }        from './modules/hauschat.js';
 import { initInfo }            from './modules/info.js';
 import { initAudiotest }       from './modules/audiotest.js';
+import { initAi }             from './modules/ai.js';
 import { loadSiteConfig, getSiteConfig } from './siteConfig.js';
 import { isLocalAvailable }    from './localBridge.js';
 
@@ -43,6 +44,7 @@ export async function boot() {
   initHauschat();
   initInfo();
   initAudiotest();
+  initAi();
 
   // Show initial server status, then refresh every 30 s (matches health-check TTL).
   updateLocalStatus();
@@ -83,7 +85,7 @@ async function updateLocalStatus() {
 // Subpages are opened from a menu rather than the tab bar (the colour picker
 // and Hauschat, from the "Diverses" menu). The value is the tab that stays
 // highlighted while the subpage is open.
-const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', info: 'diverses' };
+const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', ai: 'diverses', info: 'diverses' };
 
 /**
  * Sets up the bottom tab bar and the subpage navigation.
