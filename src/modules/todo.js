@@ -456,6 +456,9 @@ export async function initTodo() {
   }
   document.getElementById('todo-us-bar').hidden = true; // hidden until server status known
   window.addEventListener('pwa:server', e => applyTodoUsVisibility(e.detail));
+  // updateLocalStatus() may have already fired before this listener was registered;
+  // apply the cached result immediately so the bar never flickers visible.
+  isLocalAvailable().then(online => applyTodoUsVisibility(online));
 
   // Refresh the list whenever the user navigates to the TODO tab — forces a
   // fresh health-check so the list appears immediately after joining home WiFi.

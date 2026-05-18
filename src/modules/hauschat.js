@@ -403,6 +403,8 @@ export async function initHauschat() {
   }
   document.getElementById('chat-us-bar').hidden = true; // until the server status is known
   window.addEventListener('pwa:server', e => applyUsVisibility(e.detail));
+  // Apply the cached server status in case pwa:server already fired before this listener.
+  isLocalAvailable().then(online => applyUsVisibility(online));
 
   if (device) showChat();
   else        showSetup();
