@@ -61,18 +61,24 @@ function render() {
     return;
   }
 
-  list.innerHTML = history.map(m => `
+  list.innerHTML = history.map((m, i) => `
     <div class="ai-msg ai-msg-${m.role}">
       <div class="ai-bubble">${m.content ? fmt(m.content) : '<span class="ai-cursor">▍</span>'}</div>
-      ${m.content ? `<button class="ai-copy-btn" title="Kopieren" onclick="
-        navigator.clipboard.writeText(${JSON.stringify(m.content)}).then(()=>{
-          const b=this;b.textContent='✓';setTimeout(()=>b.textContent='⎘',1200);
-        });
-      ">⎘</button>` : ''}
+      ${m.content ? `<button class="ai-copy-btn" data-idx="${i}" title="Kopieren">⎘</button>` : ''}
     </div>`).join('') +
     (thinking
       ? '<div class="ai-msg ai-msg-assistant"><div class="ai-bubble"><span class="ai-cursor">▍</span></div></div>'
       : '');
+
+  list.querySelectorAll('.ai-copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const content = history[Number(btn.dataset.idx)]?.content ?? '';
+      navigator.clipboard.writeText(content).then(() => {
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = '⎘', 1200);
+      });
+    });
+  });
 
   list.scrollTop = list.scrollHeight;
 }
