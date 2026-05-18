@@ -6,14 +6,19 @@
  * This covers the "no server reachable" cases: a foreign WiFi, or an
  * aeroplane where there is no shared network between the phones.
  *
- * ggwave is a WASM library. Its two files (ggwave.js + ggwave.wasm) are NOT
- * in this repository by default — see vendor/ggwave/README.md for how to add
- * them. Until they are present, isUltrasoundAvailable() resolves false and
- * the feature stays disabled instead of crashing the app.
+ * ggwave is a WASM library. Its file (vendor/ggwave/ggwave.js, with the WASM
+ * embedded) is NOT in this repository by default — see vendor/ggwave/README.md.
+ * Until it is present, isUltrasoundAvailable() resolves false and the feature
+ * stays disabled instead of crashing the app.
  *
- * Transmit and receive use one shared AudioContext. The "audible" flag picks
- * an audible (reliable, a chirping sound) vs an ultrasound (~near-inaudible)
- * protocol for SENDING; receiving auto-detects either.
+ * startListening() asks for the microphone FIRST, before loading ggwave, so
+ * the browser's permission prompt always appears — even if ggwave were to
+ * fail. Receiving auto-detects audible or ultrasound; the "audible" flag only
+ * picks the protocol used for SENDING.
+ *
+ * This is the low-level codec/transport. Subapps normally use the stateful
+ * wrapper UltrasoundChannel (ultrasoundChannel.js) instead of these functions
+ * directly.
  */
 
 // Path to the vendored ggwave loader (classic script — defines window.ggwave_factory).
@@ -53,15 +58,19 @@ function loadScript() {
 }
 
 /**
- * Loads ggwave and creates the AudioContext + instance. Must be called from
- * a user gesture the first time (browser autoplay policy). Returns true once
- * ready, throws if the ggwave files are missing.
+ * Creates the shared AudioContext if it does not exist yet. Kept synchronous
+ * so it can run inside the user gesture that opened ultrasound mode, which
+ * keeps the browser autoplay policy happy.
  */
-async function ensureReady() {
+function ensureContext() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+/** Loads ggwave and initialises the instance (needs the AudioContext first). */
+async function ensureGgwave() {
   if (instance != null) return;
   await loadScript();
   ggwave = await window.ggwave_factory();
-  ctx = new (window.AudioContext || window.webkitAudioContext)();
   const p = ggwave.getDefaultParameters();
   p.sampleRateInp = ctx.sampleRate;
   p.sampleRateOut = ctx.sampleRate;
@@ -70,10 +79,11 @@ async function ensureReady() {
 
 /**
  * Returns true if ultrasound messaging can work here: the browser has the
- * needed audio APIs and the ggwave library files are reachable.
+ * needed audio APIs and the ggwave library file is reachable.
  */
 export async function isUltrasoundAvailable() {
-  if (!navigator.mediaDevices || !(window.AudioContext || window.webkitAudioContext)) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
+      !(window.AudioContext || window.webkitAudioContext)) {
     return false;
   }
   try { await loadScript(); return true; }
@@ -90,7 +100,8 @@ export const MAX_PAYLOAD_BYTES = 140;
  * @param {{ audible?: boolean }} opts - audible vs ultrasound protocol.
  */
 export async function transmit(text, { audible = false } = {}) {
-  await ensureReady();
+  ensureContext();
+  await ensureGgwave();
   if (ctx.state === 'suspended') await ctx.resume();
 
   const protocol = audible
@@ -114,36 +125,51 @@ export async function transmit(text, { audible = false } = {}) {
 
 /**
  * Starts listening on the microphone. Every fully decoded message is passed
- * to onMessage(text). Requires microphone permission.
+ * to onMessage(text).
+ *
+ * The microphone is requested FIRST (before ggwave is loaded), so the
+ * browser permission prompt always appears. If the user denies it, this
+ * rejects with NotAllowedError; if the device has no microphone, with
+ * NotFoundError — the caller maps these to a clear message.
  *
  * @param {(text: string) => void} onMessage
  */
 export async function startListening(onMessage) {
   if (listening) return;
-  await ensureReady();
-  if (ctx.state === 'suspended') await ctx.resume();
+  ensureContext();
 
+  // 1. Microphone — this triggers the permission prompt.
   micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  micSource = ctx.createMediaStreamSource(micStream);
-  recorder  = ctx.createScriptProcessor(1024, 1, 1);
 
-  recorder.onaudioprocess = e => {
-    const samples = new Float32Array(e.inputBuffer.getChannelData(0));
-    const res = ggwave.decode(instance, convertTypedArray(samples, Int8Array));
-    if (res && res.length > 0) {
-      try { onMessage(new TextDecoder('utf-8').decode(res)); } catch { /* ignore garbled */ }
-    }
-  };
+  // 2. ggwave + audio graph. On any failure, release the microphone again.
+  try {
+    await ensureGgwave();
+    if (ctx.state === 'suspended') await ctx.resume();
 
-  // A ScriptProcessor only runs while connected downstream. Route it through
-  // a silent gain node so the microphone is not echoed back to the speakers.
-  const mute = ctx.createGain();
-  mute.gain.value = 0;
-  micSource.connect(recorder);
-  recorder.connect(mute);
-  mute.connect(ctx.destination);
+    micSource = ctx.createMediaStreamSource(micStream);
+    recorder  = ctx.createScriptProcessor(1024, 1, 1);
+    recorder.onaudioprocess = e => {
+      const samples = new Float32Array(e.inputBuffer.getChannelData(0));
+      const res = ggwave.decode(instance, convertTypedArray(samples, Int8Array));
+      if (res && res.length > 0) {
+        try { onMessage(new TextDecoder('utf-8').decode(res)); } catch { /* garbled */ }
+      }
+    };
 
-  listening = true;
+    // A ScriptProcessor only runs while connected downstream. Route it through
+    // a silent gain node so the microphone is not echoed back to the speakers.
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    micSource.connect(recorder);
+    recorder.connect(mute);
+    mute.connect(ctx.destination);
+
+    listening = true;
+  } catch (e) {
+    try { micStream.getTracks().forEach(t => t.stop()); } catch { /* already gone */ }
+    micStream = micSource = recorder = null;
+    throw e;
+  }
 }
 
 /** Stops listening and releases the microphone. */

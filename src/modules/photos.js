@@ -53,6 +53,15 @@ function fmtSize(bytes) {
 }
 
 /**
+ * The photo's stored filename on the server (id + extension, e.g.
+ * "20260518_0834_01.jpg"). Shown in the gallery and used as the download
+ * name — meta.name only holds the original (often generic) upload name.
+ */
+function storedName(meta) {
+  return meta.id + '.' + meta.ext;
+}
+
+/**
  * Fetches a photo (or the photo list) from the local server.
  * On HTTP 401 the token is cleared and the page reloads so auth.js prompts
  * for the passphrase again.
@@ -101,15 +110,17 @@ function render(photos) {
     const tile = document.createElement('div');
     tile.className = 'photo-tile';
 
+    const name = storedName(meta);
+
     const img = document.createElement('img');
     img.className = 'photo-thumb';
-    img.alt = meta.name;
+    img.alt = name;
     img.loading = 'lazy';
     tile.appendChild(img);
 
     const bar = document.createElement('div');
     bar.className = 'photo-bar';
-    bar.innerHTML = `<span class="photo-name" title="${meta.name}">${meta.name}</span>
+    bar.innerHTML = `<span class="photo-name" title="${name}">${name}</span>
                      <span class="photo-size">${fmtSize(meta.size)}</span>`;
 
     const dl = document.createElement('button');
@@ -155,7 +166,7 @@ async function downloadPhoto(meta) {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
-    a.download = meta.name;
+    a.download = storedName(meta);
     a.click();
     URL.revokeObjectURL(url);
   } catch {
@@ -165,7 +176,7 @@ async function downloadPhoto(meta) {
 
 /** Deletes a photo after a confirmation prompt, then reloads the gallery. */
 async function deletePhoto(meta) {
-  if (!confirm(`Foto „${meta.name}" wirklich löschen?`)) return;
+  if (!confirm(`Foto „${storedName(meta)}" wirklich löschen?`)) return;
   try {
     await api('/' + meta.id, { method: 'DELETE' });
     setStatus('Foto gelöscht.');
