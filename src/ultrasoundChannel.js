@@ -25,7 +25,7 @@
  */
 
 import {
-  transmit, startListening, stopListening, isListening,
+  transmit, startListening, stopListening,
   isUltrasoundAvailable, MAX_PAYLOAD_BYTES,
 } from './ultrasound.js';
 
@@ -57,6 +57,7 @@ export class UltrasoundChannel {
     this._onMessage = onMessage || (() => {});
     this._onStatus  = onStatus  || (() => {});
     this._onVis     = this._handleVisibility.bind(this);
+    this._listener  = null; // handle from startListening(), null when off
 
     /** Whether the channel is currently listening. */
     this.enabled = false;
@@ -89,7 +90,7 @@ export class UltrasoundChannel {
       // suppression / auto gain. Those filter out the data-over-sound signal —
       // verified via the Audiotest subapp: with them ON, ultrasound reception
       // fails on most devices; with them OFF it works on Chrome, Android, iOS.
-      await startListening(text => this._onMessage(text), { disableProcessing: true });
+      this._listener = await startListening(text => this._onMessage(text), { disableProcessing: true });
     } catch (e) {
       console.error('[UltrasoundChannel] enable failed:', e);
       this._onStatus(errorText(e), true);
@@ -103,7 +104,8 @@ export class UltrasoundChannel {
   /** Stops listening and releases the microphone. */
   disable() {
     if (!this.enabled) return;
-    stopListening();
+    stopListening(this._listener);
+    this._listener = null;
     this.enabled = false;
     document.removeEventListener('visibilitychange', this._onVis);
     this._onStatus('', false);
@@ -154,9 +156,11 @@ export class UltrasoundChannel {
   _handleVisibility() {
     if (!this.enabled) return;
     if (document.hidden) {
-      stopListening();
-    } else if (!isListening()) {
-      startListening(text => this._onMessage(text), { disableProcessing: true }).catch(() => {});
+      if (this._listener) { stopListening(this._listener); this._listener = null; }
+    } else if (!this._listener) {
+      startListening(text => this._onMessage(text), { disableProcessing: true })
+        .then(l => { this._listener = l; })
+        .catch(() => { /* mic unavailable — stays off until next toggle */ });
     }
   }
 }

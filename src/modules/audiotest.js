@@ -43,15 +43,13 @@ async function runTest() {
   runBtn.disabled = true;
 
   const expected = 'TEST-' + Math.random().toString(36).slice(2, 7).toUpperCase();
-  let decoded = null;
-  let peak    = 0;
+  let decoded  = null;
+  let peak     = 0;
+  let listener = null; // own microphone listener — removed again at the end
 
   try {
-    // Start from a clean state (in case Hauschat's channel was still listening).
-    stopListening();
-
     setStatus('⏳ Mikrofon wird geöffnet…');
-    await startListening(
+    listener = await startListening(
       text => { decoded = text; },
       {
         disableProcessing: true,
@@ -66,14 +64,14 @@ async function runTest() {
     const t0 = Date.now();
     while (!decoded && Date.now() - t0 < 5000) await sleep(150);
   } catch (e) {
-    stopListening();
+    if (listener) stopListening(listener);
     setStatus('⚠️ Test fehlgeschlagen: ' + ((e && e.name) || e), 'error');
     running = false;
     runBtn.disabled = false;
     return;
   }
 
-  stopListening();
+  stopListening(listener);
   setMeter(peak);
   const pct  = Math.round(peak * 100);
   const mode = audible ? 'hörbar' : 'Ultraschall';

@@ -25,19 +25,32 @@
  *  All mutations (add, toggle, delete, edit) update the local state and
  *  re-render immediately, without waiting for the server. If the server call
  *  fails, the change is added to the pending queue for later sync.
+ *
+ * Ultrasound (peer-to-peer over sound):
+ *  When ultrasound mode is on, a newly added item is also broadcast as sound
+ *  via the shared UltrasoundChannel; nearby devices decode it and add it —
+ *  with no server at all. Only adds travel this way; toggle/edit/delete
+ *  reconcile via the server, which stays the source of truth.
  */
 
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
 import { clearToken } from '../auth.js';
+import { UltrasoundChannel } from '../ultrasoundChannel.js';
 
 // localStorage keys
 const CACHE_KEY   = 'pwa.todos.cache';   // last known list state
 const PENDING_KEY = 'pwa.todos.pending'; // operations waiting to be synced
 
+// Separator between id and text in the ultrasound envelope. A TODO envelope
+// has exactly one separator (2 fields) — that field count tells it apart from
+// other subapps' payloads on the shared microphone.
+const US_SEP = '';
+
 // In-memory state — always kept in sync with localStorage.
 let todos        = [];
 let pendingQueue = [];
+let usChannel    = null;   // UltrasoundChannel — shares new items over sound
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -85,6 +98,71 @@ function setOffline(offline) {
       ? `📵 Offline — ${pendingQueue.length} Änderung${pendingQueue.length !== 1 ? 'en' : ''} wird synchronisiert`
       : '📵 Nicht im Heim-WLAN — Änderungen werden synchronisiert';
   }
+}
+
+// ── Ultrasound (peer-to-peer over sound) ──────────────────────────────────────
+
+/** Shows a short status message in the TODO ultrasound bar. */
+function setTodoUsStatus(text, isError = false) {
+  const el = document.getElementById('todo-us-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+/** Updates the ultrasound buttons to reflect the channel's current state. */
+function syncTodoUsUi() {
+  const btn  = document.getElementById('todo-us-toggle');
+  const freq = document.getElementById('todo-us-freq');
+  btn.classList.toggle('active', usChannel.enabled);
+  btn.textContent  = usChannel.enabled ? '📡 Ultraschall an' : '📡 Ultraschall';
+  freq.hidden      = !usChannel.enabled;
+  freq.textContent = usChannel.audible ? 'Modus: hörbar' : 'Modus: Ultraschall';
+}
+
+/** Switches ultrasound mode on/off (microphone listening + broadcasting adds). */
+async function toggleTodoUltrasound() {
+  await usChannel.toggle();
+  syncTodoUsUi();
+}
+
+/** Flips the send protocol between ultrasound and audible. */
+function toggleTodoFreq() {
+  usChannel.setMode(!usChannel.audible);
+  syncTodoUsUi();
+}
+
+/**
+ * Broadcasts a newly added item as sound. The item also follows the normal
+ * server path — ultrasound is just an extra hop so nearby devices see it even
+ * with no server. Oversized items are skipped (they still reach the server).
+ */
+function broadcastItem(item) {
+  const envelope = item.id + US_SEP + item.text;
+  if (new TextEncoder().encode(envelope).length > usChannel.maxBytes) {
+    setTodoUsStatus('⚠️ Eintrag zu lang für Ultraschall — nur über Server', true);
+    return;
+  }
+  usChannel.send(envelope); // the channel reports its own status
+}
+
+/**
+ * Handles a payload decoded from the microphone. A TODO envelope has exactly
+ * two fields (id + text) — that field count tells it apart from other subapps'
+ * payloads on the shared microphone, which are simply ignored here.
+ *
+ * Deduplicates by id (also drops a device hearing its own broadcast). The home
+ * server stays the source of truth and reconciles the list on the next sync.
+ */
+function onUltrasoundItem(str) {
+  const parts = String(str).split(US_SEP);
+  if (parts.length !== 2) return; // not a TODO envelope — ignore
+  const [id, text] = parts;
+  if (!id || !text || todos.some(t => t.id === id)) return;
+
+  todos.unshift({ id, text, done: false });
+  saveCache();
+  render();
 }
 
 // ── Raw API ───────────────────────────────────────────────────────────────────
@@ -306,9 +384,12 @@ async function doAdd(text) {
   if (!text) return;
 
   const tempId = 'tmp-' + crypto.randomUUID();
-  todos.unshift({ id: tempId, text, done: false });
+  const item   = { id: tempId, text, done: false };
+  todos.unshift(item);
   saveCache();
   render();
+
+  if (usChannel?.enabled) broadcastItem(item); // also emit over sound
 
   if (await isLocalAvailable()) {
     try {
@@ -330,7 +411,7 @@ async function doAdd(text) {
  * Wires up the add-button and input field, then loads the initial list.
  * Called once by app.js during boot.
  */
-export function initTodo() {
+export async function initTodo() {
   // Restore any pending operations that survived a page reload.
   pendingQueue = readPending();
 
@@ -341,6 +422,22 @@ export function initTodo() {
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') { doAdd(input.value); input.value = ''; }
   });
+
+  // Ultrasound — the TODO list reuses the shared UltrasoundChannel so new
+  // items can spread between devices with no server. The bar is hidden if
+  // the ggwave library is unavailable.
+  usChannel = new UltrasoundChannel({
+    name:      'todo',
+    onMessage: onUltrasoundItem,
+    onStatus:  setTodoUsStatus,
+  });
+  if (await usChannel.available()) {
+    document.getElementById('todo-us-toggle').addEventListener('click', toggleTodoUltrasound);
+    document.getElementById('todo-us-freq').addEventListener('click', toggleTodoFreq);
+    syncTodoUsUi();
+  } else {
+    document.getElementById('todo-us-bar').hidden = true;
+  }
 
   // When the browser reports it is back online, invalidate the health-check
   // cache and reload — this triggers a sync of any pending operations.
