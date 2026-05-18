@@ -51,6 +51,7 @@ const US_SEP = '';
 let todos        = [];
 let pendingQueue = [];
 let usChannel    = null;   // UltrasoundChannel — shares new items over sound
+let usAvailable  = false;  // whether ggwave/microphone are usable on this device
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -101,6 +102,22 @@ function setOffline(offline) {
 }
 
 // ── Ultrasound (peer-to-peer over sound) ──────────────────────────────────────
+
+/**
+ * Shows/hides the ultrasound bar based on server availability.
+ * Ultrasound is the no-server fallback, so the bar is only visible when the
+ * server is unreachable. If the server comes back, ultrasound is disabled.
+ */
+function applyTodoUsVisibility(serverOnline) {
+  const bar = document.getElementById('todo-us-bar');
+  if (!bar) return;
+  if (usAvailable && !serverOnline) {
+    bar.hidden = false;
+  } else {
+    if (usChannel?.enabled) { usChannel.disable(); syncTodoUsUi(); }
+    bar.hidden = true;
+  }
+}
 
 /** Shows a short status message in the TODO ultrasound bar. */
 function setTodoUsStatus(text, isError = false) {
@@ -431,13 +448,20 @@ export async function initTodo() {
     onMessage: onUltrasoundItem,
     onStatus:  setTodoUsStatus,
   });
-  if (await usChannel.available()) {
+  usAvailable = await usChannel.available();
+  if (usAvailable) {
     document.getElementById('todo-us-toggle').addEventListener('click', toggleTodoUltrasound);
     document.getElementById('todo-us-freq').addEventListener('click', toggleTodoFreq);
     syncTodoUsUi();
-  } else {
-    document.getElementById('todo-us-bar').hidden = true;
   }
+  document.getElementById('todo-us-bar').hidden = true; // hidden until server status known
+  window.addEventListener('pwa:server', e => applyTodoUsVisibility(e.detail));
+
+  // Refresh the list whenever the user navigates to the TODO tab — forces a
+  // fresh health-check so the list appears immediately after joining home WiFi.
+  window.addEventListener('pwa:page', e => {
+    if (e.detail === 'todo') { invalidateLocal(); load(); }
+  });
 
   // When the browser reports it is back online, invalidate the health-check
   // cache and reload — this triggers a sync of any pending operations.

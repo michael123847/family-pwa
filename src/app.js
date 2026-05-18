@@ -66,20 +66,24 @@ async function locationTick() {
  * status dot (#local-status) with CSS classes 'online' or 'offline'.
  */
 async function updateLocalStatus() {
-  const el = document.getElementById('local-status');
-  if (!el) return;
   const online = await isLocalAvailable();
-  el.classList.toggle('online',  online);
-  el.classList.toggle('offline', !online);
-  el.title = online ? 'Local server: Online' : 'Local server: Offline';
+
+  const el = document.getElementById('local-status');
+  if (el) {
+    el.classList.toggle('online',  online);
+    el.classList.toggle('offline', !online);
+    el.title = online ? 'Local server: Online' : 'Local server: Offline';
+  }
+
+  // Subapps listen for this to show their ultrasound option only when the
+  // home server is NOT reachable — ultrasound is the no-server fallback.
+  window.dispatchEvent(new CustomEvent('pwa:server', { detail: online }));
 }
 
 // Subpages are opened from a menu rather than the tab bar (the colour picker
 // and Hauschat, from the "Diverses" menu). The value is the tab that stays
 // highlighted while the subpage is open.
-const SUBPAGE_OWNER = {
-  color: 'diverses', hauschat: 'diverses', info: 'diverses', audiotest: 'diverses',
-};
+const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', info: 'diverses' };
 
 /**
  * Sets up the bottom tab bar and the subpage navigation.
@@ -100,6 +104,8 @@ function initTabs() {
     const ownerTab = SUBPAGE_OWNER[name] ?? name;
     tabBtns.forEach(t => t.classList.toggle('active', t.dataset.page === ownerTab));
     localStorage.setItem('pwa.page', name);
+    // Notify subapps (todo, photos) so they can refresh on tab activation.
+    window.dispatchEvent(new CustomEvent('pwa:page', { detail: name }));
   }
 
   // Restore the page the user last had open (tab or subpage). 'pwa.tab' is

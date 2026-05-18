@@ -30,6 +30,76 @@ const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 // Revoked on every re-render so old blobs do not leak memory.
 let objectUrls = new Map();
 
+// ── EXIF helper ───────────────────────────────────────────────────────────────
+
+/**
+ * Reads the EXIF DateTimeOriginal from a JPEG file and returns a ms timestamp,
+ * or null if the tag is absent or the file is not a JPEG.
+ *
+ * Android's file picker sets file.lastModified to the share time rather than
+ * the capture time, so we parse the EXIF tag directly. iOS sets lastModified
+ * correctly from the EXIF tag, but using the tag directly works there too.
+ *
+ * Only the first 64 KB is read — enough to cover the APP1/EXIF segment.
+ */
+async function readJpegCaptureDateMs(file) {
+  if (file.type !== 'image/jpeg') return null;
+  try {
+    const buf  = await file.slice(0, 65536).arrayBuffer();
+    const view = new DataView(buf);
+    if (view.getUint16(0) !== 0xFFD8) return null;
+
+    // Walk JPEG markers to find APP1 (0xFFE1) containing the Exif block.
+    let pos = 2;
+    while (pos + 4 <= buf.byteLength) {
+      const marker = view.getUint16(pos);
+      if (marker === 0xFFD9 || (marker & 0xFF00) !== 0xFF00) break;
+      const segLen = view.getUint16(pos + 2);
+      if (marker === 0xFFE1 && segLen >= 8) {
+        const h = String.fromCharCode(
+          view.getUint8(pos+4), view.getUint8(pos+5),
+          view.getUint8(pos+6), view.getUint8(pos+7));
+        if (h === 'Exif') return _parseExifDto(view, pos + 10);
+      }
+      if (segLen < 2) break;
+      pos += 2 + segLen;
+    }
+  } catch { /* fall back to file.lastModified */ }
+  return null;
+}
+
+/** Parses DateTimeOriginal (tag 0x9003) from a TIFF block starting at `base`. */
+function _parseExifDto(view, base) {
+  if (base + 8 > view.byteLength) return null;
+  const le  = view.getUint16(base) === 0x4949;
+  const u16 = o => view.getUint16(base + o, le);
+  const u32 = o => view.getUint32(base + o, le);
+  if (u16(2) !== 42) return null;                     // TIFF magic check
+
+  // IFD0 — look for ExifIFD pointer (tag 0x8769).
+  let off = u32(4);
+  const n0 = u16(off); off += 2;
+  let exifOff = 0;
+  for (let i = 0; i < n0; i++, off += 12)
+    if (u16(off) === 0x8769) { exifOff = u32(off + 8); break; }
+  if (!exifOff) return null;
+
+  // ExifIFD — look for DateTimeOriginal (tag 0x9003).
+  const ne = u16(exifOff); off = exifOff + 2;
+  for (let i = 0; i < ne; i++, off += 12) {
+    if (u16(off) !== 0x9003) continue;
+    const count  = u32(off + 4);
+    const valOff = count <= 4 ? off + 8 : u32(off + 8);
+    let str = '';
+    for (let j = 0; j < count - 1 && base + valOff + j < view.byteLength; j++)
+      str += String.fromCharCode(view.getUint8(base + valOff + j));
+    // EXIF date format: "YYYY:MM:DD HH:MM:SS"
+    const m = str.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+    if (m) return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  }
+  return null;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Shows a transient status message; pass '' to clear it. */
@@ -205,10 +275,12 @@ async function uploadFiles(fileList) {
     if (!ACCEPTED.includes(file.type)) { skipped++; continue; }
     setStatus(`Lade hoch… (${done + 1}/${files.length})`);
     try {
-      // ts = the file's own date (capture time for camera photos); the server
-      // builds the stored filename from it.
+      // Prefer the EXIF capture date (reliable on both iOS and Android).
+      // Android's file picker often sets lastModified to the share time rather
+      // than the photo's actual capture time — EXIF tag 0x9003 is the fix.
+      const ts = (await readJpegCaptureDateMs(file)) ?? file.lastModified || Date.now();
       await api('?name=' + encodeURIComponent(file.name)
-                + '&ts=' + (file.lastModified || Date.now()), {
+                + '&ts=' + ts, {
         method:  'POST',
         headers: { 'Content-Type': file.type },
         body:    file,
@@ -260,6 +332,12 @@ export function initPhotos() {
   input.addEventListener('change', () => {
     uploadFiles(input.files);
     input.value = ''; // allow re-selecting the same file later
+  });
+
+  // Refresh the gallery whenever the user navigates to the Photos tab — forces
+  // a fresh health-check so photos appear immediately after joining home WiFi.
+  window.addEventListener('pwa:page', e => {
+    if (e.detail === 'photos') { invalidateLocal(); load(); }
   });
 
   // Reload when the device comes back onto the home network.

@@ -16,6 +16,27 @@
 import { CONFIG } from '../config.js';
 import { getSiteConfig } from '../siteConfig.js';
 
+const SBB_WEB = 'https://www.sbb.ch/de';
+const SBB_APP = 'sbbmobile://';  // iOS SBB Mobile app URL scheme
+
+/**
+ * Opens SBB: the native app on mobile (with website fallback if not installed),
+ * or the website directly on desktop.
+ */
+function openSBB() {
+  const ua       = navigator.userAgent;
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(ua);
+  if (!isMobile) { window.open(SBB_WEB, '_blank', 'noopener'); return; }
+  const t = setTimeout(() => window.open(SBB_WEB, '_blank', 'noopener'), 1500);
+  document.addEventListener('visibilitychange', function h() {
+    clearTimeout(t);
+    document.removeEventListener('visibilitychange', h);
+  }, { once: true });
+  window.location.href = SBB_APP;
+}
+
+let _transitListenerAttached = false;
+
 /**
  * Returns the CSS class name for a given line number.
  * Lines 2, 3, and 31 have dedicated colour classes; all others use a default.
@@ -120,6 +141,13 @@ async function fetchStop(stop) {
  * a hint is shown instead.
  */
 export async function loadTransit() {
+  // Attach dblclick handler once — opens SBB app/website on double-tap.
+  if (!_transitListenerAttached) {
+    _transitListenerAttached = true;
+    document.getElementById('transit-container')
+      .addEventListener('dblclick', openSBB);
+  }
+
   const stops = getSiteConfig()?.stops;
   if (!stops || !stops.length) {
     document.getElementById('transit-container').innerHTML =
