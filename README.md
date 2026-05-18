@@ -13,7 +13,9 @@ Das öffentliche Frontend enthält **keine** privaten Daten. Standortdaten
 - **TODO** — gemeinsame Einkaufs-/Aufgabenliste, offline-fähig mit Sync
 - **Diverses**
   - *Farbe* — RGB-Farbwähler mit Harmonie-Paletten
-  - *Hauschat* — kleiner Familien-Messenger über den Heim-Server
+  - *Hauschat* — Familien-Messenger; zwei Übertragungswege (siehe unten)
+  - *Info* — Diagnose: App-/Service-Worker-Version, Server- und Mikrofon-Status,
+    Geräteinfo, Knopf „Cache leeren & neu laden"
 - **Fotos** — Galerie mit Up- und Download
 
 ## Architektur
@@ -30,6 +32,25 @@ Browser (diese PWA, GitHub Pages)
 Wetter und Abfahrten nutzen öffentliche APIs direkt. Der Standort (Koordinaten,
 Haltestellen) wird einmalig vom Heim-Server geholt und lokal gecacht — er steht
 nicht in diesem öffentlichen Repo.
+
+## Hauschat — zwei Übertragungswege
+
+Ein gemeinsamer Nachrichten-Thread für alle Familiengeräte:
+
+1. **Server-Relay** — Nachrichten laufen über den Heim-Server (48 h
+   Aufbewahrung). Standardweg im Heim-WLAN.
+2. **Ultraschall (P2P)** — bei aktiviertem Ultraschall-Modus wird die Nachricht
+   zusätzlich als Tonsignal ausgesendet; nahe Geräte dekodieren sie über das
+   Mikrofon. Funktioniert **ganz ohne Netzwerk** (fremdes WLAN, Flugzeug).
+
+Der Ultraschall-Teil nutzt die [ggwave](https://github.com/ggerganov/ggwave)-
+Bibliothek. Deren Datei wird **nicht** mitgeliefert — sie muss einmal in
+`vendor/ggwave/` abgelegt werden, siehe [`vendor/ggwave/README.md`](vendor/ggwave/README.md).
+Fehlt sie, ist die Ultraschall-Funktion einfach ausgeblendet; der Rest läuft normal.
+
+Die Ultraschall-Logik ist als wiederverwendbare Einheit ausgelagert
+([`src/ultrasoundChannel.js`](src/ultrasoundChannel.js)) — andere Subapps können
+sie ebenfalls nutzen.
 
 ## Zugang
 
@@ -51,6 +72,12 @@ python -m http.server 8000
 # Browser: http://localhost:8000
 ```
 
+## Versionierung
+
+`src/config.js` → `APP_VERSION` und `sw.js` → `VERSION` werden bei jedem Deploy
+gemeinsam hochgezählt (gleicher Wert). Die Info-Subapp zeigt beide an — so lässt
+sich auf jedem Gerät prüfen, welcher Stand wirklich geladen ist.
+
 ## Deployment
 
 GitHub Pages via Actions — der Workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
@@ -66,10 +93,19 @@ family-pwa/
 │   ├── main.js               # Einstieg: Passwort-Gate → boot
 │   ├── app.js                # Tab-/Subpage-Navigation, Modul-Start
 │   ├── auth.js               # PBKDF2-Passwort-Gate
-│   ├── config.js             # URLs, Auth-Parameter (keine Standortdaten)
+│   ├── config.js             # App-Version, URLs, Auth-Parameter (keine Standortdaten)
 │   ├── localBridge.js        # Verbindung zum Heim-Server
-│   ├── siteConfig.js         # Standort-Config vom Server holen + cachen
-│   └── modules/              # weather, transit, todo, swatch, photos, hauschat, background
+│   ├── siteConfig.js         # Standort-Config (Wetter/Haltestellen) holen + cachen
+│   ├── ultrasound.js         # Low-Level: Data-over-Sound-Codec (ggwave)
+│   ├── ultrasoundChannel.js  # Wiederverwendbare P2P-Ultraschall-Einheit
+│   └── modules/
+│       ├── weather.js, transit.js, background.js   # Home
+│       ├── todo.js                                 # TODO
+│       ├── swatch.js                               # Farbe
+│       ├── photos.js                               # Fotos
+│       ├── hauschat.js                             # Hauschat
+│       └── info.js                                 # Info
+├── vendor/ggwave/            # ggwave-Bibliothek für Ultraschall (separat ablegen)
 ├── setup/                    # CA-Zertifikat-Installationsseite
 └── tools/make-hash.html      # Passwort-Hash-Generator
 ```

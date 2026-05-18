@@ -147,6 +147,10 @@ export async function startListening(onMessage) {
     if (ctx.state === 'suspended') await ctx.resume();
 
     micSource = ctx.createMediaStreamSource(micStream);
+    // ScriptProcessorNode is deprecated (browsers log a warning) — used here
+    // deliberately: it is far simpler than an AudioWorklet, which would need a
+    // separate worklet file and cross-thread messaging to reach the ggwave
+    // decoder. It works in all current browsers; ggwave's own examples use it.
     recorder  = ctx.createScriptProcessor(1024, 1, 1);
     recorder.onaudioprocess = e => {
       const samples = new Float32Array(e.inputBuffer.getChannelData(0));

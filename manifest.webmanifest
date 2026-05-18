@@ -1,7 +1,7 @@
 {
   "name": "Familien-PWA",
   "short_name": "Family",
-  "description": "Familie, Wetter & TODO",
+  "description": "Familien-Infozentrale: Wetter, Abfahrten, TODO, Fotos, Hauschat",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
