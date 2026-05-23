@@ -1013,6 +1013,23 @@ input[type=range]:active::-webkit-slider-thumb {
   max-width: 60%;
 }
 .ai-model-select:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Without this, the dropdown panel inherits a white OS background but keeps
+   the parent's white text, making unselected items invisible until hovered. */
+.ai-model-select option {
+  background: var(--card);
+  color: var(--text);
+}
+
+.ai-error {
+  align-self: stretch;
+  background: rgba(255, 165, 0, 0.12);
+  border: 1px solid rgba(255, 165, 0, 0.35);
+  border-radius: 10px;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
 
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
