@@ -16,7 +16,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v23',
+  APP_VERSION: 'v24',
 
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
@@ -29,6 +29,7 @@ export const CONFIG = {
   LOCAL_CONFIG_PATH: '/api/config',   // weather location + transit stops (kept off the public repo)
   LOCAL_BG_PATH:     '/assets/family-bg.jpg', // family photo served by the local server
   LOCAL_AI_PATH:     '/api/ai/chat',  // streaming AI chat proxy → Ollama
+  LOCAL_AI_MODELS_PATH: '/api/ai/models', // list of installed Ollama models
   HEALTH_TIMEOUT_MS: 1500,            // abort the health check after 1.5 s to avoid long waits
 
   // ── Weather — open-meteo.com ───────────────────────────────────────

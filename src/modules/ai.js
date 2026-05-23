@@ -16,8 +16,10 @@
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, authHeaders } from '../localBridge.js';
 
-const AI_URL     = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_PATH;
-const CACHE_KEY  = 'pwa.ai.history';
+const AI_URL        = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_PATH;
+const AI_MODELS_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_MODELS_PATH;
+const CACHE_KEY     = 'pwa.ai.history';
+const MODEL_KEY     = 'pwa.ai.model';
 
 // System prompt sent at the start of every request (not stored in history).
 const SYSTEM = {
@@ -27,8 +29,9 @@ const SYSTEM = {
 };
 
 // In-memory conversation (user + assistant turns only, no system message).
-let history  = [];
-let thinking = false; // true while waiting for the first token
+let history       = [];
+let thinking      = false; // true while waiting for the first token
+let selectedModel = localStorage.getItem(MODEL_KEY) ?? ''; // chosen Ollama model
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -87,6 +90,61 @@ function setOffline(offline) {
   document.getElementById('ai-offline')?.classList.toggle('visible', offline);
 }
 
+// ── Model dropdown ────────────────────────────────────────────────────────────
+
+/**
+ * Fetches the list of installed Ollama models from the local server and
+ * populates the dropdown. Restores the previously chosen model from
+ * localStorage if it is still installed; otherwise falls back to the
+ * server's default model.
+ */
+async function loadModels() {
+  const sel = document.getElementById('ai-model');
+  if (!sel) return;
+
+  try {
+    const r = await fetch(AI_MODELS_URL, {
+      cache:       'no-store',
+      credentials: 'omit',
+      headers:     authHeaders(),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const { models = [], default: defaultModel = '' } = await r.json();
+
+    if (!models.length) {
+      sel.innerHTML = '<option>kein Modell installiert</option>';
+      sel.disabled = true;
+      selectedModel = '';
+      return;
+    }
+
+    const names  = models.map(m => m.name);
+    const stored = localStorage.getItem(MODEL_KEY);
+    selectedModel = names.includes(stored) ? stored
+                  : names.includes(defaultModel) ? defaultModel
+                  : names[0];
+    localStorage.setItem(MODEL_KEY, selectedModel);
+
+    sel.innerHTML = names.map(n =>
+      `<option value="${esc(n)}"${n === selectedModel ? ' selected' : ''}>${esc(n)}</option>`
+    ).join('');
+    sel.disabled = false;
+  } catch {
+    sel.innerHTML = '<option>Modelle nicht geladen</option>';
+    sel.disabled = true;
+  }
+}
+
+/** Switching the model clears the conversation to avoid mixing styles. */
+function onModelChange(newModel) {
+  if (!newModel || newModel === selectedModel) return;
+  selectedModel = newModel;
+  localStorage.setItem(MODEL_KEY, newModel);
+  history = [];
+  saveHistory();
+  render();
+}
+
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 async function send(text) {
@@ -108,7 +166,10 @@ async function send(text) {
       method:      'POST',
       credentials: 'omit',
       headers:     { 'Content-Type': 'application/json', ...authHeaders() },
-      body:        JSON.stringify({ messages: [SYSTEM, ...history] }),
+      body:        JSON.stringify({
+        messages: [SYSTEM, ...history],
+        model:    selectedModel,
+      }),
     });
 
     if (!r.ok) {
@@ -175,11 +236,17 @@ export function initAi() {
     history = []; saveHistory(); render();
   });
 
-  // Refresh server status every time the user opens this subpage.
+  document.getElementById('ai-model').addEventListener('change', e => {
+    if (thinking) { e.target.value = selectedModel; return; }
+    onModelChange(e.target.value);
+  });
+
+  // Refresh server status and model list every time the user opens this subpage.
   window.addEventListener('pwa:page', async e => {
     if (e.detail !== 'ai') return;
     const online = await isLocalAvailable();
     setOffline(!online);
+    if (online) await loadModels();
     render();
     if (online) input.focus();
   });

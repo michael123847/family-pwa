@@ -1003,6 +1003,17 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 .ai-msg:hover .ai-copy-btn { opacity: 1; }
 
+.ai-model-select {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  max-width: 60%;
+}
+.ai-model-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── Tab bar ──────────────────────────────────────────────────────── */
 .tab-bar {
   position: fixed;
