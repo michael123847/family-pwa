@@ -1,4 +1,4 @@
-/**
+https://homeserver.local:8443/**
  * config.js — Central configuration for the Family PWA.
  *
  * All URLs, coordinates, and authentication parameters are defined here so
@@ -21,7 +21,7 @@ export const CONFIG = {
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
   // Only reachable when the device is connected to the home WiFi.
-  LOCAL_BASE:        'https://192.168.1.187:8443',
+  LOCAL_BASE:        'https://server.local:8443',
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
   LOCAL_PHOTOS_PATH: '/api/photos',   // upload / list / download endpoint for the photo gallery
