@@ -14,6 +14,9 @@ Das öffentliche Frontend enthält **keine** privaten Daten. Standortdaten
 - **Diverses**
   - *Farbe* — RGB-Farbwähler mit Harmonie-Paletten
   - *Hauschat* — Familien-Messenger; zwei Übertragungswege (siehe unten)
+  - *KI-Assistent* — Chat mit einem lokalen Sprachmodell (Ollama auf dem
+    Heim-Server). Modell-Dropdown zur Auswahl aus den installierten
+    Ollama-Modellen; nur im Heim-WLAN verfügbar.
   - *Info* — Diagnose: App-/Service-Worker-Version, Server- und Mikrofon-Status,
     Geräteinfo, Knopf „Cache leeren & neu laden"
 - **Fotos** — Galerie mit Up- und Download
@@ -104,6 +107,7 @@ family-pwa/
 │       ├── swatch.js                               # Farbe
 │       ├── photos.js                               # Fotos
 │       ├── hauschat.js                             # Hauschat
+│       ├── ai.js                                   # KI-Assistent (Ollama-Proxy)
 │       └── info.js                                 # Info
 ├── vendor/ggwave/            # ggwave-Bibliothek für Ultraschall (separat ablegen)
 ├── setup/                    # CA-Zertifikat-Installationsseite

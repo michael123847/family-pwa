@@ -32,6 +32,7 @@ const SYSTEM = {
 let history       = [];
 let thinking      = false; // true while waiting for the first token
 let selectedModel = localStorage.getItem(MODEL_KEY) ?? ''; // chosen Ollama model
+let lastError     = ''; // transient — shown until next successful response or user action
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -59,19 +60,28 @@ function render() {
   const list = document.getElementById('ai-messages');
   if (!list) return;
 
-  if (!history.length && !thinking) {
+  if (!history.length && !thinking && !lastError) {
     list.innerHTML = '<div class="ai-empty">Stell mir eine Frage — ich bin nur im Heim-WLAN verfügbar.</div>';
     return;
   }
 
-  list.innerHTML = history.map((m, i) => `
+  const historyHtml = history.map((m, i) => `
     <div class="ai-msg ai-msg-${m.role}">
       <div class="ai-bubble">${m.content ? fmt(m.content) : '<span class="ai-cursor">▍</span>'}</div>
       ${m.content ? `<button class="ai-copy-btn" data-idx="${i}" title="Kopieren">⎘</button>` : ''}
-    </div>`).join('') +
-    (thinking
-      ? '<div class="ai-msg ai-msg-assistant"><div class="ai-bubble"><span class="ai-cursor">▍</span></div></div>'
-      : '');
+    </div>`).join('');
+
+  const thinkingHtml = thinking
+    ? '<div class="ai-msg ai-msg-assistant"><div class="ai-bubble"><span class="ai-cursor">▍</span></div></div>'
+    : '';
+
+  // Errors are transient — not stored in history, so they vanish on next
+  // successful send or when the user clears the conversation.
+  const errorHtml = lastError
+    ? `<div class="ai-error">⚠️ ${esc(lastError)}</div>`
+    : '';
+
+  list.innerHTML = historyHtml + thinkingHtml + errorHtml;
 
   list.querySelectorAll('.ai-copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -118,7 +128,10 @@ async function loadModels() {
       return;
     }
 
-    const names  = models.map(m => m.name);
+    // Smallest first — small models are usually the fastest to load and the
+    // most common default choice.
+    const sorted = [...models].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+    const names  = sorted.map(m => m.name);
     const stored = localStorage.getItem(MODEL_KEY);
     selectedModel = names.includes(stored) ? stored
                   : names.includes(defaultModel) ? defaultModel
@@ -140,7 +153,8 @@ function onModelChange(newModel) {
   if (!newModel || newModel === selectedModel) return;
   selectedModel = newModel;
   localStorage.setItem(MODEL_KEY, newModel);
-  history = [];
+  history   = [];
+  lastError = '';
   saveHistory();
   render();
 }
@@ -153,6 +167,9 @@ async function send(text) {
 
   if (!(await isLocalAvailable())) { setOffline(true); return; }
   setOffline(false);
+
+  // Clear any leftover error from a previous failed send.
+  lastError = '';
 
   history.push({ role: 'user', content: text });
   thinking = true;
@@ -211,9 +228,10 @@ async function send(text) {
 
   } catch (e) {
     thinking = false;
-    if (!history.includes(aiMsg)) history.push(aiMsg);
-    aiMsg.content = '⚠️ ' + e.message;
-    render();
+    // Drop the empty placeholder if streaming never started — it would
+    // render as an empty bubble. Surface the error as transient UI instead.
+    if (history[history.length - 1] === aiMsg && !aiMsg.content) history.pop();
+    lastError = e.message;
   }
 
   render();
@@ -233,7 +251,7 @@ export function initAi() {
 
   document.getElementById('ai-clear').addEventListener('click', () => {
     if (thinking) return;
-    history = []; saveHistory(); render();
+    history = []; lastError = ''; saveHistory(); render();
   });
 
   document.getElementById('ai-model').addEventListener('change', e => {
