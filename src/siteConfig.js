@@ -13,10 +13,15 @@
  * Shape of the config:
  *   { weather: { label, lat, lon },
  *     stops:   [ { label, name, limit, nextStop? }, ... ] }
+ *
+ * The server's config.json also carries an ENABLE_TAILSCALE flag, but the
+ * client's auth mode is NOT derived from it — that is the build-time constant
+ * CONFIG.ENABLE_TAILSCALE in config.js (see isTailscaleMode there). This
+ * module simply ignores the extra field.
  */
 
 import { CONFIG } from './config.js';
-import { isLocalAvailable, authHeaders } from './localBridge.js';
+import { isLocalAvailable, authHeaders, getBaseUrl } from './localBridge.js';
 
 // localStorage key under which the fetched config is cached.
 const CACHE_KEY = 'pwa.siteConfig';
@@ -43,7 +48,7 @@ export async function loadSiteConfig() {
   if (!(await isLocalAvailable())) return getSiteConfig();
 
   try {
-    const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_CONFIG_PATH, {
+    const r = await fetch(getBaseUrl() + CONFIG.LOCAL_CONFIG_PATH, {
       headers:     authHeaders(),
       credentials: 'omit',
       cache:       'no-store',

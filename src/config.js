@@ -16,12 +16,23 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v22',
+  APP_VERSION: 'v24',
 
-  // ── Local WLAN server ──────────────────────────────────────────────
+  // ── Auth mode switch ───────────────────────────────────────────────
+  // 0 — legacy: PBKDF2 passphrase gate, single shared token (see AUTH below).
+  // 1 — Tailscale: per-device enrollment token issued by the server.
+  //
+  // This is a BUILD-TIME constant and MUST match ENABLE_TAILSCALE.value in
+  // the server's config.json. It is deliberately NOT read from the server:
+  // the auth mode has to be known before the very first authenticated
+  // request, yet /api/config itself sits behind auth — reading the mode from
+  // there would be circular. Flipping the mode therefore means editing this
+  // value and redeploying the client (which happens per release anyway).
+  ENABLE_TAILSCALE: 0,
+
+  // ── Local server — LAN (home WiFi) ────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
-  // Only reachable when the device is connected to the home WiFi.
-  LOCAL_BASE:        'https://192.168.1.187:8443',
+  LAN_BASE:          'https://192.168.1.187:8443',
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
   LOCAL_PHOTOS_PATH: '/api/photos',   // upload / list / download endpoint for the photo gallery
@@ -30,6 +41,21 @@ export const CONFIG = {
   LOCAL_BG_PATH:     '/assets/family-bg.jpg', // family photo served by the local server
   LOCAL_AI_PATH:     '/api/ai/chat',  // streaming AI chat proxy → Ollama
   HEALTH_TIMEOUT_MS: 1500,            // abort the health check after 1.5 s to avoid long waits
+
+  // ── Local server — Tailscale (WAN, used only when ENABLE_TAILSCALE = 1) ──
+  // Set to the actual Tailscale (.ts.net) hostname once Tailscale is configured.
+  TS_BASE: 'https://TAILSCALE_HOSTNAME_PLACEHOLDER:8443',
+
+  // ── Authentication (PBKDF2 — used when ENABLE_TAILSCALE = 0) ───────
+  // The password is never stored. Instead, PBKDF2 derives a hash from the
+  // passphrase. That hash is compared to EXPECTED_HASH_B64. If they match,
+  // the hash itself is used as the Bearer token for all local API calls.
+  AUTH: {
+    SALT:              'family-pwa-2026', // makes the hash unique to this app
+    ITERATIONS:        200_000,           // high cost = slow brute-force
+    HASH_BITS:         256,               // output size in bits (= 32 bytes)
+    EXPECTED_HASH_B64: 'zbpB97WcaJM7Ta2TUSsFV2IDu5Bcsw5DUh0XV/3PrjU=',
+  },
 
   // ── Weather — open-meteo.com ───────────────────────────────────────
   // Free, CORS-enabled API — no API key or proxy required.
@@ -42,15 +68,19 @@ export const CONFIG = {
   // Free, CORS-enabled API — no API key or proxy required.
   // The list of stops also comes from /api/config — not from this public repo.
   ZVV_BASE: 'https://transport.opendata.ch/v1',
-
-  // ── Authentication ─────────────────────────────────────────────────
-  // The password is never stored. Instead, PBKDF2 derives a hash from the
-  // passphrase. That hash is compared to EXPECTED_HASH_B64. If they match,
-  // the hash itself is used as the Bearer token for all local API calls.
-  AUTH: {
-    SALT:              'family-pwa-2026', // makes the hash unique to this app
-    ITERATIONS:        200_000,           // high cost = slow brute-force
-    HASH_BITS:         256,               // output size in bits (= 32 bytes)
-    EXPECTED_HASH_B64: 'zbpB97WcaJM7Ta2TUSsFV2IDu5Bcsw5DUh0XV/3PrjU=',
-  },
 };
+
+/**
+ * Whether the app runs in Tailscale/enrollment mode (ENABLE_TAILSCALE == 1).
+ *
+ * Reads the build-time CONFIG.ENABLE_TAILSCALE constant — synchronous, with no
+ * server round-trip and no localStorage dependency. This matters because the
+ * auth flow (passphrase modal vs. enrollment screen) must be chosen before any
+ * server contact happens.
+ *
+ * Defined here, in a leaf module with no imports, so auth.js, localBridge.js
+ * and main.js can share one definition without risking a circular import.
+ */
+export function isTailscaleMode() {
+  return CONFIG.ENABLE_TAILSCALE === 1;
+}
