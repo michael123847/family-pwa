@@ -14,9 +14,8 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, authHeaders, getBaseUrl } from '../localBridge.js';
 
-const AI_URL     = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_PATH;
 const CACHE_KEY  = 'pwa.ai.history';
 
 // System prompt sent at the start of every request (not stored in history).
@@ -104,7 +103,7 @@ async function send(text) {
   const aiMsg = { role: 'assistant', content: '' };
 
   try {
-    const r = await fetch(AI_URL, {
+    const r = await fetch(getBaseUrl() + CONFIG.LOCAL_AI_PATH, {
       method:      'POST',
       credentials: 'omit',
       headers:     { 'Content-Type': 'application/json', ...authHeaders() },

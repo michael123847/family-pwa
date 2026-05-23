@@ -1,94 +1,96 @@
 /**
- * localBridge.js — Connection bridge to the local WLAN server.
+ * localBridge.js — Connection bridge to the local server (LAN or Tailscale).
  *
- * The local server (Caddy + Express) is only reachable on the home network.
- * This module provides two things:
+ * Dual-URL logic:
+ *  1. Always tries LAN_BASE first (short timeout).
+ *  2. Falls back to TS_BASE only when ENABLE_TAILSCALE=1 (isTailscaleMode()).
+ *  3. The chosen base URL is cached for TTL ms and re-evaluated on every
+ *     `online` event or explicit invalidateLocal() call.
  *
- *  1. isLocalAvailable() — checks whether the server is up by calling the
- *     /api/health endpoint. The result is cached for 30 seconds to avoid
- *     sending a request before every single API call.
- *
- *  2. authHeaders() — returns the Authorization header object that must be
- *     attached to every request to the local server.
- *
- * If the health check returns HTTP 401 (wrong token), the stored token is
- * deleted and the user will be prompted for the passphrase on next reload.
+ * Enrollment: the /api/enroll endpoint is LAN-only — the server rejects
+ * Tailscale IPs with 403, so auth.js always uses CONFIG.LAN_BASE directly.
  */
 
-import { CONFIG } from './config.js';
+import { CONFIG, isTailscaleMode } from './config.js';
 import { getToken, clearToken } from './auth.js';
 
-// Cached availability result. null means "not checked yet".
-let _available = null;
+// Which base URL the local server was last reached on:
+//   'lan' | 'tailscale' — reachable there;  null — unreachable / not checked.
+let _baseUrl = null;
 
-// Timestamp (ms) of the last health check.
+// Timestamp (ms) of the last COMPLETED detection; 0 = never checked (or just
+// invalidated). The detection result is cached for TTL ms — INCLUDING a
+// negative result, so a server that is offline is not re-probed on every call.
 let _lastCheck = 0;
 
-// How long to trust the cached result before sending a new health check.
 const TTL = 30_000; // 30 seconds
 
+// Re-check on every reconnect.
+window.addEventListener('online', () => invalidateLocal());
+
 /**
- * Returns the Authorization header needed for local server requests.
- * The token is the PBKDF2 hash of the user's passphrase (see auth.js).
- * Returns an empty object if no token is stored (user not authenticated).
- *
- * @returns {{ Authorization: string } | {}}
+ * Detects which base URL the local server is reachable on — LAN preferred,
+ * Tailscale as fallback. The outcome (reachable or not) is cached for TTL ms.
  */
+async function detectBaseUrl() {
+  const now = Date.now();
+  // A completed check (success OR failure) is still fresh — reuse it.
+  if (_lastCheck !== 0 && now - _lastCheck < TTL) return;
+
+  try {
+    // ── Try LAN first ──────────────────────────────────────────────────
+    try {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
+      const r = await fetch(CONFIG.LAN_BASE + CONFIG.LOCAL_HEALTH_PATH, {
+        signal: ctrl.signal, cache: 'no-store', credentials: 'omit',
+        headers: authHeaders(),
+      });
+      if (r.status === 401) { clearToken(); location.reload(); return; }
+      if (r.ok) { _baseUrl = 'lan'; return; }
+    } catch { /* fall through */ }
+
+    // ── Tailscale fallback (only when ENABLE_TAILSCALE = 1) ────────────
+    if (isTailscaleMode()) {
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(CONFIG.TS_BASE + CONFIG.LOCAL_HEALTH_PATH, {
+          signal: ctrl.signal, cache: 'no-store', credentials: 'omit',
+          headers: authHeaders(),
+        });
+        if (r.status === 401) { clearToken(); location.reload(); return; }
+        if (r.ok) { _baseUrl = 'tailscale'; return; }
+      } catch { /* fall through */ }
+    }
+
+    _baseUrl = null; // checked — server is currently unreachable
+  } finally {
+    // Stamp the completion time on every exit path (success, failure, or the
+    // early returns above) so the result — positive or negative — is cached.
+    _lastCheck = Date.now();
+  }
+}
+
+/**
+ * Returns the active base URL (LAN preferred, Tailscale as fallback).
+ * Always call this inside a request function — never cache at module level.
+ */
+export function getBaseUrl() {
+  if (_baseUrl === 'tailscale') return CONFIG.TS_BASE;
+  return CONFIG.LAN_BASE; // 'lan' or null (first call before check)
+}
+
+/** @returns {{ Authorization: string } | {}} */
 export function authHeaders() {
   const t = getToken();
   return t ? { Authorization: 'Bearer ' + t } : {};
 }
 
-/**
- * Checks whether the local WLAN server is currently reachable.
- * Uses a 30-second cache to avoid sending a health check before every API call.
- *
- * Returns false immediately if:
- *  - The server does not respond within HEALTH_TIMEOUT_MS (1.5 s).
- *  - The server returns HTTP 401 (token invalid — also clears the token).
- *  - The network request fails for any reason (e.g. not on home WiFi).
- *
- * @returns {Promise<boolean>}
- */
+/** @returns {Promise<boolean>} */
 export async function isLocalAvailable() {
-  const now = Date.now();
-
-  // Return cached result if it is still within the TTL window.
-  if (_available !== null && now - _lastCheck < TTL) return _available;
-
-  // AbortController lets us cancel the fetch after a timeout.
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
-
-  try {
-    const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_HEALTH_PATH, {
-      signal:      ctrl.signal,
-      cache:       'no-store',   // always ask the server, never use browser cache
-      credentials: 'omit',      // do not send cookies
-      headers:     authHeaders(),
-    });
-
-    if (r.status === 401) {
-      // Token is wrong or expired — force re-authentication.
-      clearToken();
-      _available = false;
-    } else {
-      _available = r.ok; // true for HTTP 200, false for any other status
-    }
-  } catch {
-    // Network error, timeout, or CORS failure — server is not reachable.
-    _available = false;
-  } finally {
-    clearTimeout(timer);
-    _lastCheck = now;
-  }
-
-  return _available;
+  await detectBaseUrl();
+  return _baseUrl !== null;
 }
 
-/**
- * Resets the availability cache so the next call to isLocalAvailable()
- * sends a fresh health check instead of returning the cached value.
- * Called when a request fails unexpectedly (e.g. server went offline mid-session).
- */
-export function invalidateLocal() { _available = null; }
+export function invalidateLocal() { _baseUrl = null; _lastCheck = 0; }

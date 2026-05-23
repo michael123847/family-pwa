@@ -1,25 +1,26 @@
 /**
  * main.js — Application entry point.
  *
- * This is the first JavaScript file the browser executes (loaded via
- * <script type="module"> in index.html). It runs two steps in order:
+ * Reads ENABLE_TAILSCALE from the cached siteConfig (localStorage) to decide
+ * which auth flow to use:
  *
- *  1. ensureAuthenticated() — shows a password modal and blocks until the
- *     correct passphrase is entered. The derived hash is saved to
- *     localStorage and reused on subsequent visits so the modal only
- *     appears once per device.
+ *  value == 0 (default): PBKDF2 passphrase gate — no server contact needed.
+ *  value == 1:           Server-issued token via enrollment — requires LAN
+ *                        on first setup, then works over LAN or Tailscale.
  *
- *  2. boot() — initialises all app modules (weather, transit, todos, etc.)
- *     and registers the Service Worker.
- *
- * The `async IIFE` (immediately invoked function expression) wrapper is
- * needed because top-level await is not supported in all browsers.
+ * The flag is server-controlled (config.json) and takes effect on the next
+ * app load after siteConfig has been refreshed from the server.
  */
 
-import { ensureAuthenticated } from './auth.js';
-import { boot }                from './app.js';
+import { ensureAuthenticated, ensureEnrolled } from './auth.js';
+import { isTailscaleMode } from './config.js';
+import { boot } from './app.js';
 
 (async () => {
-  await ensureAuthenticated();
+  if (isTailscaleMode()) {
+    await ensureEnrolled();
+  } else {
+    await ensureAuthenticated();
+  }
   await boot();
 })();

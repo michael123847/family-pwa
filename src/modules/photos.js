@@ -18,10 +18,9 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, invalidateLocal, authHeaders, getBaseUrl } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 
-const PHOTOS_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_PHOTOS_PATH;
 
 // MIME types the server accepts — mirrors PHOTO_TYPES in server.js.
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -141,7 +140,7 @@ function storedName(meta) {
  * @returns {Promise<Response>}
  */
 async function api(path, opts = {}) {
-  const r = await fetch(PHOTOS_URL + path, {
+  const r = await fetch(getBaseUrl() + CONFIG.LOCAL_PHOTOS_PATH + path, {
     credentials: 'omit',
     ...opts,
     headers: { ...authHeaders(), ...(opts.headers || {}) },

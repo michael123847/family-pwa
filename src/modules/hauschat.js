@@ -31,11 +31,10 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, invalidateLocal, authHeaders, getBaseUrl } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 import { UltrasoundChannel } from '../ultrasoundChannel.js';
 
-const CHAT_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_CHAT_PATH;
 const DB_NAME  = 'hauschat';
 const POLL_MS  = 4000;        // poll interval while the subpage is open
 const US_SEP   = '';    // unit separator inside the ultrasound envelope
@@ -109,7 +108,7 @@ function esc(s) {
  * @returns {Promise<object>} Parsed JSON response.
  */
 async function api(path, opts = {}) {
-  const r = await fetch(CHAT_URL + path, {
+  const r = await fetch(getBaseUrl() + CONFIG.LOCAL_CHAT_PATH + path, {
     credentials: 'omit',
     method:      opts.method || 'GET',
     headers:     { 'Content-Type': 'application/json', ...authHeaders() },

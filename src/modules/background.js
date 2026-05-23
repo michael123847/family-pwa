@@ -21,7 +21,7 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, authHeaders, getBaseUrl } from '../localBridge.js';
 
 // Name of the Cache API bucket used for the family photo.
 const CACHE_NAME = 'family-bg-v1';
@@ -109,7 +109,7 @@ export async function setFamilyBackground(el) {
   }
 
   try {
-    const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_BG_PATH, {
+    const r = await fetch(getBaseUrl() + CONFIG.LOCAL_BG_PATH, {
       headers:     authHeaders(),
       credentials: 'omit',
     });
