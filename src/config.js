@@ -1,4 +1,4 @@
-https://homeserver.local:8443/**
+/**
  * config.js — Central configuration for the Family PWA.
  *
  * All URLs, coordinates, and authentication parameters are defined here so
@@ -16,7 +16,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v22',
+  APP_VERSION: 'v23',
 
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
