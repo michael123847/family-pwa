@@ -13,11 +13,12 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, invalidateLocal, authHeaders, getActiveBase } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 
-const SHARE_URL   = CONFIG.LOCAL_BASE + CONFIG.LOCAL_SHARE_PATH;
-const FOLDERS_URL = SHARE_URL + '/folders';
+// Computed lazily — see localBridge.getActiveBase() / probeBase().
+const shareUrl   = () => getActiveBase() + CONFIG.LOCAL_SHARE_PATH;
+const foldersUrl = () => shareUrl() + '/folders';
 
 const MAX_FOLDER_DEPTH = 2;
 const MAX_BYTES        = 10 * 1024 * 1024;
@@ -64,7 +65,7 @@ function fileIconFor(name) {
 }
 
 async function api(path, opts = {}) {
-  const r = await fetch(SHARE_URL + path, {
+  const r = await fetch(shareUrl() + path, {
     credentials: 'omit',
     ...opts,
     headers: { ...authHeaders(), ...(opts.headers || {}) },
@@ -74,7 +75,7 @@ async function api(path, opts = {}) {
 }
 
 async function folderApi(opts = {}, queryOrPath = '') {
-  const r = await fetch(FOLDERS_URL + queryOrPath, {
+  const r = await fetch(foldersUrl() + queryOrPath, {
     credentials: 'omit',
     ...opts,
     headers: { ...authHeaders(), ...(opts.headers || {}) },

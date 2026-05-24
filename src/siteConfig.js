@@ -16,7 +16,7 @@
  */
 
 import { CONFIG } from './config.js';
-import { isLocalAvailable, authHeaders } from './localBridge.js';
+import { isLocalAvailable, authHeaders, getActiveBase } from './localBridge.js';
 
 // localStorage key under which the fetched config is cached.
 const CACHE_KEY = 'pwa.siteConfig';
@@ -43,7 +43,7 @@ export async function loadSiteConfig() {
   if (!(await isLocalAvailable())) return getSiteConfig();
 
   try {
-    const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_CONFIG_PATH, {
+    const r = await fetch(getActiveBase() + CONFIG.LOCAL_CONFIG_PATH, {
       headers:     authHeaders(),
       credentials: 'omit',
       cache:       'no-store',

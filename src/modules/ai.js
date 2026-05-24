@@ -14,10 +14,11 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, authHeaders, getActiveBase } from '../localBridge.js';
 
-const AI_URL        = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_PATH;
-const AI_MODELS_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_AI_MODELS_PATH;
+// Computed lazily — see localBridge.getActiveBase() / probeBase().
+const aiUrl       = () => getActiveBase() + CONFIG.LOCAL_AI_PATH;
+const aiModelsUrl = () => getActiveBase() + CONFIG.LOCAL_AI_MODELS_PATH;
 const CACHE_KEY     = 'pwa.ai.history';
 const MODEL_KEY     = 'pwa.ai.model';
 
@@ -113,7 +114,7 @@ async function loadModels() {
   if (!sel) return;
 
   try {
-    const r = await fetch(AI_MODELS_URL, {
+    const r = await fetch(aiModelsUrl(), {
       cache:       'no-store',
       credentials: 'omit',
       headers:     authHeaders(),
@@ -179,7 +180,7 @@ async function send(text) {
   const aiMsg = { role: 'assistant', content: '' };
 
   try {
-    const r = await fetch(AI_URL, {
+    const r = await fetch(aiUrl(), {
       method:      'POST',
       credentials: 'omit',
       headers:     { 'Content-Type': 'application/json', ...authHeaders() },

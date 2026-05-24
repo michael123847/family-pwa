@@ -34,7 +34,7 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, invalidateLocal, authHeaders, getActiveBase } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 import { UltrasoundChannel } from '../ultrasoundChannel.js';
 
@@ -194,7 +194,7 @@ function onUltrasoundItem(str) {
  * @returns {Promise<object|null>} Parsed JSON response, or null for DELETE.
  */
 async function apiRaw(method, body) {
-  const r = await fetch(CONFIG.LOCAL_BASE + CONFIG.LOCAL_TODO_PATH, {
+  const r = await fetch(getActiveBase() + CONFIG.LOCAL_TODO_PATH, {
     method,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body:    body !== undefined ? JSON.stringify(body) : undefined,

@@ -17,7 +17,7 @@
  * enrollment endpoint is already "in the building" and gets Visitor by default.
  */
 
-import { CONFIG } from './config.js';
+import { getActiveBase } from './localBridge.js';
 
 const STORAGE_KEY = 'pwa.auth.token';
 const ROLE_KEY    = 'pwa.auth.role';    // cached role for offline-resilient UI
@@ -75,7 +75,7 @@ async function refreshWhoami() {
   const t = getToken();
   if (!t) return { status: 'no-token' };
   try {
-    const r = await fetch(CONFIG.LOCAL_BASE + '/api/whoami', {
+    const r = await fetch(getActiveBase() + '/api/whoami', {
       cache:       'no-store',
       credentials: 'omit',
       headers:     { Authorization: 'Bearer ' + t },
@@ -123,7 +123,7 @@ async function backgroundRetry(delayMs = 5000) {
  */
 async function enroll() {
   try {
-    const r = await fetch(CONFIG.LOCAL_BASE + '/api/enroll-self', {
+    const r = await fetch(getActiveBase() + '/api/enroll-self', {
       method:  'POST',
       cache:   'no-store',
       headers: { 'Content-Type': 'application/json' },

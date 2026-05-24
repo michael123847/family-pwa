@@ -26,11 +26,13 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
+import { isLocalAvailable, invalidateLocal, authHeaders, getActiveBase } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 
-const PHOTOS_URL  = CONFIG.LOCAL_BASE + CONFIG.LOCAL_PHOTOS_PATH;
-const FOLDERS_URL = PHOTOS_URL + '/folders';
+// Computed lazily so a network change (LAN ↔ Tailscale) is picked up
+// automatically — see localBridge.getActiveBase() + probeBase().
+const photosUrl  = () => getActiveBase() + CONFIG.LOCAL_PHOTOS_PATH;
+const foldersUrl = () => photosUrl() + '/folders';
 
 // Maximum folder nesting depth — must match server's MAX_FOLDER_DEPTH.
 const MAX_FOLDER_DEPTH = 2;
@@ -180,7 +182,7 @@ function folderLeafName(folder) {
  * @returns {Promise<Response>}
  */
 async function api(path, opts = {}) {
-  const r = await fetch(PHOTOS_URL + path, {
+  const r = await fetch(photosUrl() + path, {
     credentials: 'omit',
     ...opts,
     headers: { ...authHeaders(), ...(opts.headers || {}) },
@@ -198,7 +200,7 @@ async function api(path, opts = {}) {
 
 /** Like api(), but targets the folders endpoint directly. */
 async function folderApi(opts = {}, queryOrPath = '') {
-  const r = await fetch(FOLDERS_URL + queryOrPath, {
+  const r = await fetch(foldersUrl() + queryOrPath, {
     credentials: 'omit',
     ...opts,
     headers: { ...authHeaders(), ...(opts.headers || {}) },

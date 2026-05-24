@@ -16,15 +16,21 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v32',
+  APP_VERSION: 'v33',
 
-  // ── Local WLAN server ──────────────────────────────────────────────
-  // The Express API runs behind Caddy (TLS) on the home network.
-  // Only reachable when the device is connected to the home WiFi.
-  // ▼ THE SWITCH ▼ — change this single line back to 'https://server.local:8443'
-  // and bump APP_VERSION (and sw.js VERSION) to roll back to LAN-only mode.
-  // The cert and Caddyfile keep both names, so flipping this is the only
-  // step needed in either direction.
+  // ── Local server — two reachable hostnames ─────────────────────────
+  // The server is served by Caddy on the same port under two names:
+  //   LAN_BASE — mDNS hostname, only reachable on the home Wi-Fi
+  //   TS_BASE  — Tailscale MagicDNS name, reachable from anywhere on the
+  //              tailnet (and direct-LAN-routed when the device is at home)
+  // At startup, localBridge probes LAN_BASE with a short timeout. If the
+  // probe succeeds the session uses LAN_BASE; otherwise it falls back to
+  // TS_BASE. See src/localBridge.js -> probeBase() and getActiveBase().
+  LAN_BASE:          'https://server.local:8443',
+  TS_BASE:           'https://server.tail2636e9.ts.net:8443',
+  // Kept as a fallback / convenience: any code that imports CONFIG.LOCAL_BASE
+  // without going through getActiveBase() will at least pick the Tailscale
+  // hostname, which works everywhere on the tailnet.
   LOCAL_BASE:        'https://server.tail2636e9.ts.net:8443',
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
