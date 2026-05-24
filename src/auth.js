@@ -61,25 +61,57 @@ function defaultLabel() {
 }
 
 /**
- * Calls /api/whoami and updates the cached role + label. Returns the role on
- * success, or null if the call failed (network/401/etc).
+ * Calls /api/whoami and updates the cached role + label. Returns one of:
+ *  - { status: 'ok',       role }     — server validated the token, role cached
+ *  - { status: 'rejected'           } — server returned 401 (token not in whitelist)
+ *  - { status: 'soft-fail', detail } — network error, timeout, 5xx, or non-JSON
+ *
+ * The 'rejected' vs 'soft-fail' distinction matters: rejected = we must
+ * re-enroll (and lose the device's role assignment); soft-fail = the server is
+ * just temporarily unreachable (Tailscale handshake, weak Wi-Fi, etc.) and the
+ * token is probably still valid — we keep it.
  */
 async function refreshWhoami() {
   const t = getToken();
-  if (!t) return null;
+  if (!t) return { status: 'no-token' };
   try {
     const r = await fetch(CONFIG.LOCAL_BASE + '/api/whoami', {
       cache:       'no-store',
       credentials: 'omit',
       headers:     { Authorization: 'Bearer ' + t },
     });
-    if (!r.ok) return null;
+    if (r.status === 401) return { status: 'rejected' };
+    if (!r.ok)            return { status: 'soft-fail', detail: 'HTTP_' + r.status };
     const body = await r.json();
     localStorage.setItem(ROLE_KEY,  body.role  ?? '');
     localStorage.setItem(LABEL_KEY, body.device_label ?? '');
-    return body.role;
-  } catch {
-    return null;
+    // Tell the app the role might have changed — applyRoleVisibility() listens
+    // for this and re-applies the hidden state on tabs/menu entries.
+    window.dispatchEvent(new CustomEvent('pwa:role-changed', { detail: body.role }));
+    return { status: 'ok', role: body.role };
+  } catch (e) {
+    return { status: 'soft-fail', detail: e.message };
+  }
+}
+
+/**
+ * Background retry: keeps trying /api/whoami until it succeeds (or the token
+ * is rejected). Used after a cold-start soft-fail so the PWA doesn't stay
+ * stuck with a stale cached role for an entire session.
+ */
+async function backgroundRetry(delayMs = 5000) {
+  while (true) {
+    await new Promise(r => setTimeout(r, delayMs));
+    const result = await refreshWhoami();
+    if (result.status === 'ok')        return;
+    if (result.status === 'rejected') {
+      // Token's actually gone — clear and let the next reload re-enroll.
+      clearToken();
+      console.warn('Background whoami: token rejected, cleared. Reload to re-enroll.');
+      return;
+    }
+    // Still failing — back off a bit, max 60s between retries.
+    delayMs = Math.min(delayMs * 1.5, 60_000);
   }
 }
 
@@ -109,28 +141,55 @@ async function enroll() {
 }
 
 /**
+ * Re-runs /api/whoami when the page comes back to the foreground. Picks up
+ * an admin promotion (or demotion) without the user having to fully relaunch
+ * the PWA — just switching away + back is enough.
+ */
+function watchVisibility() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && getToken()) {
+      refreshWhoami(); // best-effort; fires pwa:role-changed on its own if role updated
+    }
+  });
+}
+
+/**
  * Top-level entry point called by main.js before boot().
  * Ensures the device has a whitelist token and a fresh role assignment.
  *
  *  - If a token already exists: refresh role via /api/whoami.
- *      - If that succeeds, done.
- *      - If 401 (token revoked or whitelist wiped): clear and re-enroll.
+ *      - ok       → happy path, role updated
+ *      - rejected → server says the token is unknown; clear it and re-enroll
+ *      - soft-fail → server unreachable (e.g. Tailscale not ready yet);
+ *                    keep the token, use cached role, retry in background
  *  - If no token: enroll as Visitor.
  *
  * The function never throws — at worst it returns with no token cached, and
  * the rest of the app falls back to its offline / read-only state.
  */
 export async function ensureEnrolled() {
+  watchVisibility();
   if (getToken()) {
-    const role = await refreshWhoami();
-    if (role) return; // happy path
-    // Token didn't validate — clear and try enroll-self
+    const result = await refreshWhoami();
+    if (result.status === 'ok')        return; // happy path
+    if (result.status === 'soft-fail') {
+      // Network not ready / server temporarily down. KEEP the token — the
+      // most common case is a cold start before Tailscale has finished its
+      // handshake, where the token is still perfectly valid. Background
+      // retry will update the cached role once the network catches up.
+      console.warn('whoami soft-failed at boot:', result.detail, '— keeping token, retrying in background.');
+      backgroundRetry();
+      return;
+    }
+    // status === 'rejected' → server explicitly said the token is unknown.
     clearToken();
   }
   const ok = await enroll();
   if (!ok) {
     // Couldn't enroll. UI will load with role="" and most subapps hidden.
     // Wetter / Abfahrten / Farben work without a token (public APIs).
-    console.warn('Enrollment failed — running in degraded mode.');
+    // Schedule a retry — server may come up shortly.
+    console.warn('Enrollment failed — running in degraded mode, will retry.');
+    setTimeout(ensureEnrolled, 10_000);
   }
 }
