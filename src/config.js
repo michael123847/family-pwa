@@ -16,7 +16,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v30',
+  APP_VERSION: 'v31',
 
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
@@ -50,13 +50,9 @@ export const CONFIG = {
   ZVV_BASE: 'https://transport.opendata.ch/v1',
 
   // ── Authentication ─────────────────────────────────────────────────
-  // The password is never stored. Instead, PBKDF2 derives a hash from the
-  // passphrase. That hash is compared to EXPECTED_HASH_B64. If they match,
-  // the hash itself is used as the Bearer token for all local API calls.
-  AUTH: {
-    SALT:              'family-pwa-2026', // makes the hash unique to this app
-    ITERATIONS:        200_000,           // high cost = slow brute-force
-    HASH_BITS:         256,               // output size in bits (= 32 bytes)
-    EXPECTED_HASH_B64: 'zbpB97WcaJM7Ta2TUSsFV2IDu5Bcsw5DUh0XV/3PrjU=',
-  },
+  // No shared secret. Each device is auto-enrolled as "Visitor" on first
+  // contact (POST /api/enroll-self) and gets a long random Bearer token
+  // stored in localStorage under 'pwa.auth.token'. Admin promotes the
+  // device to a higher role via tools/admin.html on the server.
+  // See src/auth.js for the enrollment + role-tracking logic.
 };
