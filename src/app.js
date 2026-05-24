@@ -23,8 +23,25 @@ import { initAi }             from './modules/ai.js';
 import { initShare }          from './modules/share.js';
 import { loadSiteConfig, getSiteConfig } from './siteConfig.js';
 import { isLocalAvailable }    from './localBridge.js';
+import { hasRole }             from './auth.js';
+
+/**
+ * Applies role-based UI visibility. Any element with a data-min-role attribute
+ * is hidden when the device's current role is below that minimum. Called once
+ * on boot, and again whenever the role might have changed (e.g. after a
+ * /api/whoami refresh).
+ *
+ * The server enforces the same rules — this is purely a UX nicety so users
+ * don't see menu entries that would just give them a 403.
+ */
+function applyRoleVisibility() {
+  document.querySelectorAll('[data-min-role]').forEach(el => {
+    el.hidden = !hasRole(el.dataset.minRole);
+  });
+}
 
 export async function boot() {
+  applyRoleVisibility();
   initTabs();
 
   // Register the Service Worker for offline caching of the app shell.
@@ -87,7 +104,7 @@ async function updateLocalStatus() {
 // Subpages are opened from a menu rather than the tab bar (the colour picker
 // and Hauschat, from the "Diverses" menu). The value is the tab that stays
 // highlighted while the subpage is open.
-const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', ai: 'diverses', info: 'diverses' };
+const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', ai: 'diverses', share: 'diverses', info: 'diverses' };
 
 /**
  * Sets up the bottom tab bar and the subpage navigation.
@@ -114,9 +131,15 @@ function initTabs() {
 
   // Restore the page the user last had open (tab or subpage). 'pwa.tab' is
   // the older key, kept so existing installs migrate cleanly. Falls back to
-  // "home" if the stored page no longer exists.
+  // "home" if the stored page no longer exists OR the user's current role
+  // doesn't allow it (e.g. demoted Family → Visitor while last on Fotos).
   let saved = localStorage.getItem('pwa.page') || localStorage.getItem('pwa.tab') || 'home';
   if (!document.getElementById('page-' + saved)) saved = 'home';
+  // If a tab/menu element for this page has data-min-role that the current
+  // role doesn't meet, bounce back to home.
+  const ownerName = SUBPAGE_OWNER[saved] ?? saved;
+  const owner     = document.querySelector(`[data-page="${ownerName}"], [data-subpage="${saved}"]`);
+  if (owner && owner.dataset.minRole && !hasRole(owner.dataset.minRole)) saved = 'home';
   show(saved);
 
   tabBtns.forEach(btn => {
