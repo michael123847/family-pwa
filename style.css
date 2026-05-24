@@ -693,6 +693,88 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 
 .photo-actions { margin-top: 14px; }
+
+/* ── Share (file list) ─────────────────────────────────────────────── */
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+}
+.share-row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+}
+.share-icon { font-size: 1.3rem; text-align: center; }
+.share-name {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-size {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Conflict dialog (Ersetzen / Beide behalten / Abbrechen) */
+.share-conflict-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 50;
+}
+.share-conflict-dialog {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 20px;
+  width: min(360px, calc(100vw - 32px));
+  z-index: 51;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+.share-conflict-title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.share-conflict-message {
+  margin: 0 0 18px;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  word-wrap: break-word;
+}
+.share-conflict-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.share-conflict-btn {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.share-conflict-btn:hover { background: rgba(255,255,255,0.06); }
+.share-conflict-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+.share-conflict-btn-primary:hover { opacity: 0.92; }
+.share-conflict-btn-cancel { color: var(--text-dim); }
 .photo-upload-btn {
   width: 100%;
   background: var(--accent);

@@ -17,6 +17,10 @@ Das öffentliche Frontend enthält **keine** privaten Daten. Standortdaten
   - *KI-Assistent* — Chat mit einem lokalen Sprachmodell (Ollama auf dem
     Heim-Server). Modell-Dropdown zur Auswahl aus den installierten
     Ollama-Modellen; nur im Heim-WLAN verfügbar.
+  - *Share* — Allzweck-Dateiablage auf dem Heim-Server (jeder Dateityp, max.
+    10 MB pro Datei). Originale Dateinamen bleiben erhalten; Ordner-Modell
+    wie bei Fotos (max. 2 Ebenen). Bei Namens-Konflikt fragt die App im
+    Windows-Stil: Ersetzen / Beide behalten / Abbrechen.
   - *Info* — Diagnose: App-/Service-Worker-Version, Server- und Mikrofon-Status,
     Geräteinfo, Knopf „Cache leeren & neu laden"
 - **Fotos** — Galerie mit Up- und Download
@@ -108,6 +112,7 @@ family-pwa/
 │       ├── photos.js                               # Fotos
 │       ├── hauschat.js                             # Hauschat
 │       ├── ai.js                                   # KI-Assistent (Ollama-Proxy)
+│       ├── share.js                                # Share (Allzweck-Dateiablage)
 │       └── info.js                                 # Info
 ├── vendor/ggwave/            # ggwave-Bibliothek für Ultraschall (separat ablegen)
 ├── setup/                    # CA-Zertifikat-Installationsseite

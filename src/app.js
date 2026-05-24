@@ -20,6 +20,7 @@ import { initHauschat }        from './modules/hauschat.js';
 import { initInfo }            from './modules/info.js';
 import { initAudiotest }       from './modules/audiotest.js';
 import { initAi }             from './modules/ai.js';
+import { initShare }          from './modules/share.js';
 import { loadSiteConfig, getSiteConfig } from './siteConfig.js';
 import { isLocalAvailable }    from './localBridge.js';
 
@@ -45,6 +46,7 @@ export async function boot() {
   initInfo();
   initAudiotest();
   initAi();
+  initShare();
 
   // Show initial server status, then refresh every 30 s (matches health-check TTL).
   updateLocalStatus();

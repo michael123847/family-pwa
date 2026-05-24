@@ -79,6 +79,11 @@
         <span class="menu-label">KI-Assistent</span>
         <span class="menu-chevron">›</span>
       </button>
+      <button class="menu-item" data-subpage="share">
+        <span class="menu-icon">📁</span>
+        <span class="menu-label">Share</span>
+        <span class="menu-chevron">›</span>
+      </button>
       <button class="menu-item" data-subpage="info">
         <span class="menu-icon">ℹ️</span>
         <span class="menu-label">Info</span>
@@ -183,6 +188,45 @@
       <button class="add-btn" id="ai-send" aria-label="Senden">→</button>
     </div>
     <button class="ai-clear-btn" id="ai-clear">Gespräch löschen</button>
+  </div>
+
+  <!-- ── SHARE (Unterseite von Diverses) — Allzweck-Dateiablage ────── -->
+  <div id="page-share" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+    <div class="photo-header">
+      <button class="photo-back-btn" id="share-back-btn" hidden aria-label="Eine Ebene zurück">‹</button>
+      <p class="section-label" id="share-breadcrumb">Share</p>
+      <div class="photo-menu" id="share-menu">
+        <button class="photo-menu-btn" id="share-menu-btn" aria-label="Aktionen" aria-haspopup="true" aria-expanded="false">⋮</button>
+        <div class="photo-menu-list" id="share-menu-list" hidden role="menu">
+          <button class="photo-menu-item" id="share-menu-newfolder" role="menuitem">Neuer Ordner</button>
+          <button class="photo-menu-item" id="share-menu-delfolder" role="menuitem" hidden>Ordner löschen</button>
+        </div>
+      </div>
+    </div>
+    <div class="photo-actions">
+      <button class="photo-upload-btn" id="share-upload-btn">+ Datei hochladen (max. 10 MB)</button>
+      <input type="file" id="share-input" multiple hidden>
+    </div>
+    <div class="offline-banner" id="share-offline-banner">
+      📵 Nicht im Heim-WLAN — Ablage nicht verfügbar
+    </div>
+    <div class="photo-status" id="share-status"></div>
+    <div class="photo-folders" id="share-folders"></div>
+    <div class="share-list" id="share-list"></div>
+    <div class="photo-empty" id="share-empty">Noch keine Dateien — lade eine über den Knopf oben hoch.</div>
+
+    <!-- Conflict dialog (Windows-style overwrite / rename / cancel) -->
+    <div class="share-conflict-backdrop" id="share-conflict-backdrop" hidden></div>
+    <div class="share-conflict-dialog" id="share-conflict-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="share-conflict-title">
+      <p id="share-conflict-title" class="share-conflict-title">Datei existiert bereits</p>
+      <p id="share-conflict-message" class="share-conflict-message"></p>
+      <div class="share-conflict-actions">
+        <button class="share-conflict-btn share-conflict-btn-primary" id="share-conflict-replace">Ersetzen</button>
+        <button class="share-conflict-btn" id="share-conflict-rename">Beide behalten</button>
+        <button class="share-conflict-btn share-conflict-btn-cancel" id="share-conflict-cancel">Abbrechen</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── HAUSCHAT (Unterseite von Diverses) ────────────────────────── -->
