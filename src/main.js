@@ -20,8 +20,13 @@
 
 import { ensureEnrolled } from './auth.js';
 import { boot }           from './app.js';
+import { probeBase }      from './localBridge.js';
 
 (async () => {
+  // Probe LAN_BASE first so getActiveBase() returns the right URL by the
+  // time auth.js and the modules start making requests. Bounded by
+  // CONFIG.HEALTH_TIMEOUT_MS (1.5 s) — no perceptible startup lag.
+  await probeBase();
   await ensureEnrolled();
   await boot();
 })();
