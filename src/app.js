@@ -28,8 +28,8 @@ import { hasRole }             from './auth.js';
 /**
  * Applies role-based UI visibility. Any element with a data-min-role attribute
  * is hidden when the device's current role is below that minimum. Called once
- * on boot, and again whenever the role might have changed (e.g. after a
- * /api/whoami refresh).
+ * on boot, and again whenever auth.js fires `pwa:role-changed` (e.g. after a
+ * background /api/whoami succeeded and learned the device was promoted).
  *
  * The server enforces the same rules — this is purely a UX nicety so users
  * don't see menu entries that would just give them a 403.
@@ -42,6 +42,8 @@ function applyRoleVisibility() {
 
 export async function boot() {
   applyRoleVisibility();
+  // Re-apply whenever the role changes (admin promotion, cold-start retry).
+  window.addEventListener('pwa:role-changed', applyRoleVisibility);
   initTabs();
 
   // Register the Service Worker for offline caching of the app shell.
