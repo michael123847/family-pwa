@@ -31,7 +31,7 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v29';
+const VERSION   = 'v30';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 
@@ -113,10 +113,21 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // ── Local server ─────────────────────────────────────────────────────
+  // ── Local / private server (LAN, mDNS, Tailscale) ────────────────────
   // Never intercept — these requests need auth headers and fresh data.
   // Returning without calling e.respondWith() lets the browser handle them.
-  if (url.hostname === '192.168.1.187' || url.hostname.endsWith('.local')) {
+  // We bypass:
+  //   - *.local           — mDNS hostnames (server.local, etc.)
+  //   - *.ts.net          — Tailscale MagicDNS names (when LOCAL_BASE points
+  //                         at the tailnet hostname for off-LAN access)
+  //   - 100.64.0.0/10     — Tailscale CGNAT range (raw IP form)
+  //   - 192.168.0.0/16    — typical home LAN range
+  //   - 10.0.0.0/8        — alt home/office LAN range
+  if (url.hostname.endsWith('.local') ||
+      url.hostname.endsWith('.ts.net') ||
+      /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(url.hostname) ||
+      /^192\.168\./.test(url.hostname) ||
+      /^10\./.test(url.hostname)) {
     return;
   }
 

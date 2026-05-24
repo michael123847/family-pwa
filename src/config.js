@@ -16,12 +16,16 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v29',
+  APP_VERSION: 'v30',
 
   // ── Local WLAN server ──────────────────────────────────────────────
   // The Express API runs behind Caddy (TLS) on the home network.
   // Only reachable when the device is connected to the home WiFi.
-  LOCAL_BASE:        'https://server.local:8443',
+  // ▼ THE SWITCH ▼ — change this single line back to 'https://server.local:8443'
+  // and bump APP_VERSION (and sw.js VERSION) to roll back to LAN-only mode.
+  // The cert and Caddyfile keep both names, so flipping this is the only
+  // step needed in either direction.
+  LOCAL_BASE:        'https://server.tail2636e9.ts.net:8443',
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
   LOCAL_PHOTOS_PATH: '/api/photos',   // upload / list / download endpoint for the photo gallery
