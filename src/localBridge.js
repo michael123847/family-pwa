@@ -55,38 +55,45 @@ export function getActiveBase() {
 }
 
 /**
- * Probes LAN_BASE/health with a short timeout. If anything comes back (even
- * 401 from no-token) the LAN path is reachable and TLS is valid, so we use
- * LAN. Otherwise fall back to Tailscale.
+ * Probes the LAN paths in priority order:
+ *   1. LAN_BASE     (server.local, via mDNS) — preferred name
+ *   2. LAN_IP_BASE  (192.168.1.29)           — bypass mDNS quirks
+ *   3. TS_BASE      (server.tail2636e9.ts.net) — fallback, always reachable on tailnet
  *
- * Called once at boot (from main.js, before module init) and on every
- * 'online' event. Re-runs are cheap and harmless.
+ * For each candidate we GET /api/health with a short timeout. Any HTTP
+ * response (even 401) proves TLS + routing work. Stops at the first hit.
+ *
+ * Console logs each attempt so connectivity issues are visible in DevTools
+ * (look for "[probeBase]"). Called at boot (main.js, before module init)
+ * and on every 'online' event.
  */
 export async function probeBase() {
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
-  let chose = CONFIG.TS_BASE;
-  try {
-    const r = await fetch(CONFIG.LAN_BASE + CONFIG.LOCAL_HEALTH_PATH, {
-      signal:      ctrl.signal,
-      cache:       'no-store',
-      credentials: 'omit',
-      // No auth header here — we just need to confirm TLS+routing.
-      // Any HTTP response (401 included) proves the LAN is reachable.
-    });
-    // Defensive: even a network-level success without an explicit status
-    // counts as reachable. We don't require r.ok.
-    if (r) chose = CONFIG.LAN_BASE;
-  } catch {
-    // Aborted / DNS-fail / TLS-fail / unreachable → stick with TS_BASE.
-  } finally {
-    clearTimeout(timer);
+  const candidates = [CONFIG.LAN_BASE, CONFIG.LAN_IP_BASE, CONFIG.TS_BASE];
+  let chose = CONFIG.TS_BASE; // last-resort default
+
+  for (const base of candidates) {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
+    try {
+      const r = await fetch(base + CONFIG.LOCAL_HEALTH_PATH, {
+        signal:      ctrl.signal,
+        cache:       'no-store',
+        credentials: 'omit',
+      });
+      console.log(`[probeBase] ${base} → HTTP ${r.status}`);
+      chose = base;
+      clearTimeout(timer);
+      break;
+    } catch (e) {
+      console.log(`[probeBase] ${base} → failed: ${e?.message || e}`);
+      clearTimeout(timer);
+      // try next candidate
+    }
   }
 
   const previous = _activeBase;
   _activeBase = chose;
-
-  // If the base actually changed, the cached "available" result is stale.
+  console.log(`[probeBase] active base = ${chose}`);
   if (previous !== chose) invalidateLocal();
 }
 
