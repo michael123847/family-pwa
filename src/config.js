@@ -16,7 +16,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v1.0.34',
+  APP_VERSION: 'v1.0.35',
 
   // ── Local server — two reachable hostnames ─────────────────────────
   // The server is served by Caddy on the same port under two names:
@@ -30,7 +30,7 @@ export const CONFIG = {
   // Direct LAN IP — used as a fallback when mDNS resolution of server.local
   // doesn't make it across (some phones cache stale Bonjour entries).
   // Update this if your router ever reassigns the server's address.
-  LAN_IP_BASE:       'https://192.168.1.29:8443',
+  LAN_IP_BASE:       'https://192.168.1.5:8443',
   TS_BASE:           'https://server.tail2636e9.ts.net:8443',
   // Kept as a fallback / convenience: any code that imports CONFIG.LOCAL_BASE
   // without going through getActiveBase() will at least pick the Tailscale
