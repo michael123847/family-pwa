@@ -597,7 +597,102 @@ input[type=range]:active::-webkit-slider-thumb {
 .copy-btn.copied { border-color: #4dff88; color: #4dff88; }
 
 /* ── Photo gallery ────────────────────────────────────────────────── */
-.photo-actions { margin-top: 20px; }
+/* Header row: back button (left, hidden at root) + breadcrumb + kebab (right) */
+.photo-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0 0;
+}
+.photo-header .section-label { margin: 0; flex: 1; }
+.photo-back-btn {
+  background: transparent;
+  border: 1px solid var(--card-border);
+  color: var(--text);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.photo-back-btn:hover { background: var(--card); }
+
+.photo-menu { position: relative; }
+.photo-menu-btn {
+  background: transparent;
+  border: 1px solid var(--card-border);
+  color: var(--text);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.photo-menu-btn:hover { background: var(--card); }
+.photo-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 160px;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.photo-menu-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.photo-menu-item:hover { background: rgba(255,255,255,0.06); }
+
+/* Folder tiles — one row above the photo grid */
+.photo-folders {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.photo-folder-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 12px 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+.photo-folder-tile:hover { background: rgba(255,255,255,0.04); }
+.photo-folder-icon  { font-size: 1.6rem; }
+.photo-folder-name  {
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.photo-folder-count {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.photo-actions { margin-top: 14px; }
 .photo-upload-btn {
   width: 100%;
   background: var(--accent);

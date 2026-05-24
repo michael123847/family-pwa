@@ -217,7 +217,17 @@
 
   <!-- ── PHOTOS ────────────────────────────────────────────────────── -->
   <div id="page-photos" class="page">
-    <p class="section-label">Foto-Galerie</p>
+    <div class="photo-header">
+      <button class="photo-back-btn" id="photo-back-btn" hidden aria-label="Eine Ebene zurück">‹</button>
+      <p class="section-label" id="photo-breadcrumb">Foto-Galerie</p>
+      <div class="photo-menu" id="photo-menu">
+        <button class="photo-menu-btn" id="photo-menu-btn" aria-label="Aktionen" aria-haspopup="true" aria-expanded="false">⋮</button>
+        <div class="photo-menu-list" id="photo-menu-list" hidden role="menu">
+          <button class="photo-menu-item" id="photo-menu-newfolder" role="menuitem">Neuer Ordner</button>
+          <button class="photo-menu-item" id="photo-menu-delfolder" role="menuitem" hidden>Ordner löschen</button>
+        </div>
+      </div>
+    </div>
     <div class="photo-actions">
       <button class="photo-upload-btn" id="photo-upload-btn">+ Foto hochladen</button>
       <input type="file" id="photo-input"
@@ -227,6 +237,7 @@
       📵 Nicht im Heim-WLAN — Galerie nicht verfügbar
     </div>
     <div class="photo-status" id="photo-status"></div>
+    <div class="photo-folders" id="photo-folders"></div>
     <div class="photo-grid" id="photo-grid"></div>
     <div class="photo-empty" id="photo-empty">Noch keine Fotos — lade dein erstes hoch!</div>
   </div>

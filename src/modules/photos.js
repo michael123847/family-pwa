@@ -5,6 +5,13 @@
  * available when the device is on the home network and the local server is
  * reachable. When offline, the gallery shows a banner and an empty grid.
  *
+ * Folder model:
+ *  The gallery has up to two levels of folders. The current location is a
+ *  forward-slash-joined path string ("" = root, "vacation" = one level deep,
+ *  "vacation/2026" = two levels). Folders are listed as tiles before the
+ *  photo grid; tapping a folder enters it; the back-button goes one level up.
+ *  Folder creation/deletion is exposed via the kebab (⋮) menu in the header.
+ *
  * Image display:
  *  The photo endpoints require an Authorization header, which a plain
  *  <img src> cannot send. So each thumbnail is fetched manually as a binary
@@ -15,13 +22,18 @@
  *  The selected File is sent as the raw request body with its MIME type in
  *  the Content-Type header. The original filename travels in the ?name=
  *  query parameter and is used only as a display label / download name.
+ *  ?folder=<currentFolder> targets the active subfolder.
  */
 
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, invalidateLocal, authHeaders } from '../localBridge.js';
 import { clearToken } from '../auth.js';
 
-const PHOTOS_URL = CONFIG.LOCAL_BASE + CONFIG.LOCAL_PHOTOS_PATH;
+const PHOTOS_URL  = CONFIG.LOCAL_BASE + CONFIG.LOCAL_PHOTOS_PATH;
+const FOLDERS_URL = PHOTOS_URL + '/folders';
+
+// Maximum folder nesting depth — must match server's MAX_FOLDER_DEPTH.
+const MAX_FOLDER_DEPTH = 2;
 
 // MIME types the server accepts — mirrors PHOTO_TYPES in server.js.
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -29,6 +41,14 @@ const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 // Object URLs currently in use by thumbnails, keyed by photo id.
 // Revoked on every re-render so old blobs do not leak memory.
 let objectUrls = new Map();
+
+// Current folder location ("" = root). State, not persisted — re-resets to
+// root every time the user reopens the app.
+let currentFolder = '';
+
+// Most-recently fetched folder list. Cached so the menu can decide whether
+// "Ordner löschen" should be enabled without an extra request.
+let folderList = []; // [{ path, photoCount }, ...]
 
 // ── EXIF helper ───────────────────────────────────────────────────────────────
 
@@ -131,6 +151,25 @@ function storedName(meta) {
   return meta.id + '.' + meta.ext;
 }
 
+/** Current folder's depth: 0 = root, 1 = first level, 2 = second level. */
+function folderDepth(folder) {
+  return folder ? folder.split('/').length : 0;
+}
+
+/** Parent folder of the current one, or '' if already at root. */
+function parentFolder(folder) {
+  if (!folder) return '';
+  const i = folder.lastIndexOf('/');
+  return i < 0 ? '' : folder.slice(0, i);
+}
+
+/** Folder name only (last segment), for display in tiles + breadcrumb. */
+function folderLeafName(folder) {
+  if (!folder) return '';
+  const i = folder.lastIndexOf('/');
+  return i < 0 ? folder : folder.slice(i + 1);
+}
+
 /**
  * Fetches a photo (or the photo list) from the local server.
  * On HTTP 401 the token is cleared and the page reloads so auth.js prompts
@@ -157,7 +196,79 @@ async function api(path, opts = {}) {
   return r;
 }
 
+/** Like api(), but targets the folders endpoint directly. */
+async function folderApi(opts = {}, queryOrPath = '') {
+  const r = await fetch(FOLDERS_URL + queryOrPath, {
+    credentials: 'omit',
+    ...opts,
+    headers: { ...authHeaders(), ...(opts.headers || {}) },
+  });
+  if (r.status === 401) { clearToken(); location.reload(); }
+  if (!r.ok) {
+    invalidateLocal();
+    const detail = await r.json().catch(() => ({}));
+    throw new Error(detail.error || ('HTTP_' + r.status));
+  }
+  return r;
+}
+
 // ── Render ────────────────────────────────────────────────────────────────────
+
+/** Updates header: back button visibility + breadcrumb text. */
+function renderHeader() {
+  document.getElementById('photo-back-btn').hidden = (currentFolder === '');
+  const crumb = document.getElementById('photo-breadcrumb');
+  crumb.textContent = currentFolder
+    ? 'Galerie › ' + currentFolder.split('/').join(' › ')
+    : 'Foto-Galerie';
+}
+
+/** Updates the kebab menu state — which items are visible/enabled. */
+function renderMenu() {
+  const newBtn = document.getElementById('photo-menu-newfolder');
+  const delBtn = document.getElementById('photo-menu-delfolder');
+
+  // "Neuer Ordner" is only allowed when the current depth still has room for
+  // a child (i.e. depth < MAX_FOLDER_DEPTH).
+  newBtn.hidden = (folderDepth(currentFolder) >= MAX_FOLDER_DEPTH);
+
+  // "Ordner löschen" only applies to the current folder when:
+  // - we're not at root, AND
+  // - the current folder is empty (no photos AND no subfolders).
+  let canDelete = false;
+  if (currentFolder !== '') {
+    const meta     = folderList.find(f => f.path === currentFolder);
+    const hasPhotos = meta ? meta.photoCount > 0 : false;
+    const hasChild  = folderList.some(f => f.path.startsWith(currentFolder + '/'));
+    canDelete = !hasPhotos && !hasChild;
+  }
+  delBtn.hidden = !canDelete;
+}
+
+/** Renders the folder-tile row (folders that are direct children of currentFolder). */
+function renderFolders() {
+  const row     = document.getElementById('photo-folders');
+  const prefix  = currentFolder ? currentFolder + '/' : '';
+  // Direct children only — no grandchildren in the same view.
+  const children = folderList.filter(f =>
+    f.path.startsWith(prefix) && !f.path.slice(prefix.length).includes('/')
+  );
+
+  row.innerHTML = '';
+  if (!children.length) return;
+
+  for (const f of children) {
+    const tile = document.createElement('button');
+    tile.className = 'photo-folder-tile';
+    tile.dataset.path = f.path;
+    tile.innerHTML = `
+      <span class="photo-folder-icon">📁</span>
+      <span class="photo-folder-name">${folderLeafName(f.path)}</span>
+      <span class="photo-folder-count">${f.photoCount}</span>`;
+    tile.addEventListener('click', () => enterFolder(f.path));
+    row.appendChild(tile);
+  }
+}
 
 /**
  * Renders the gallery grid from the given photo metadata list.
@@ -165,7 +276,7 @@ async function api(path, opts = {}) {
  * handlers can be wired up directly. The actual image bytes are fetched
  * lazily per tile after the grid is in place.
  */
-function render(photos) {
+function renderGrid(photos) {
   const grid  = document.getElementById('photo-grid');
   const empty = document.getElementById('photo-empty');
 
@@ -174,7 +285,11 @@ function render(photos) {
   objectUrls = new Map();
 
   grid.innerHTML = '';
-  empty.style.display = photos.length ? 'none' : 'block';
+
+  // "Empty" hint only matters if both photos AND folders are empty here.
+  const folderRow = document.getElementById('photo-folders');
+  const hasFolderChildren = folderRow.children.length > 0;
+  empty.style.display = (photos.length || hasFolderChildren) ? 'none' : 'block';
 
   for (const meta of photos) {
     const tile = document.createElement('div');
@@ -279,8 +394,12 @@ async function uploadFiles(fileList) {
       // Android's file picker often sets lastModified to the share time rather
       // than the photo's actual capture time — EXIF tag 0x9003 is the fix.
       const ts = (await readJpegCaptureDateMs(file)) ?? (file.lastModified || Date.now());
-      await api('?name=' + encodeURIComponent(file.name)
-                + '&ts=' + ts, {
+      const qs = new URLSearchParams({
+        name:   file.name,
+        ts:     String(ts),
+        folder: currentFolder,
+      }).toString();
+      await api('?' + qs, {
         method:  'POST',
         headers: { 'Content-Type': file.type },
         body:    file,
@@ -297,33 +416,132 @@ async function uploadFiles(fileList) {
   load();
 }
 
+// ── Folder navigation + management ────────────────────────────────────────────
+
+/** Sets currentFolder and reloads the view. */
+function enterFolder(path) {
+  currentFolder = path;
+  closeMenu();
+  load();
+}
+
+/** Goes one level up. */
+function exitFolder() {
+  currentFolder = parentFolder(currentFolder);
+  closeMenu();
+  load();
+}
+
+/** Prompts the user for a folder name and creates it via the API. */
+async function createFolderInteractive() {
+  closeMenu();
+  if (folderDepth(currentFolder) >= MAX_FOLDER_DEPTH) {
+    setStatus(`Maximal ${MAX_FOLDER_DEPTH} Ebenen — hier kein Unterordner möglich.`, true);
+    return;
+  }
+  const raw = prompt('Name für den neuen Ordner:');
+  if (raw == null) return; // user cancelled
+  const name = raw.trim();
+  if (!name) return;
+  // Client-side check to give an instant error; server enforces the same rules.
+  if (!/^[A-Za-z0-9_ \-äöüÄÖÜß]{1,40}$/.test(name) || name.includes('/')) {
+    setStatus('Ungültiger Name — erlaubt sind Buchstaben, Zahlen, Leerzeichen, _ und -.', true);
+    return;
+  }
+  const target = currentFolder ? `${currentFolder}/${name}` : name;
+  try {
+    await folderApi({
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ folder: target }),
+    });
+    setStatus(`Ordner „${name}" angelegt.`);
+    await load();
+  } catch (e) {
+    setStatus('Anlegen fehlgeschlagen: ' + e.message, true);
+  }
+}
+
+/** Deletes the current folder (empty only). On success, jumps up one level. */
+async function deleteFolderInteractive() {
+  closeMenu();
+  if (!currentFolder) return;
+  if (!confirm(`Ordner „${folderLeafName(currentFolder)}" wirklich löschen?`)) return;
+  try {
+    await folderApi({ method: 'DELETE' }, '?folder=' + encodeURIComponent(currentFolder));
+    setStatus('Ordner gelöscht.');
+    currentFolder = parentFolder(currentFolder);
+    await load();
+  } catch (e) {
+    setStatus('Löschen fehlgeschlagen: ' + e.message, true);
+  }
+}
+
+// ── Kebab (⋮) menu ────────────────────────────────────────────────────────────
+
+function toggleMenu() {
+  const list = document.getElementById('photo-menu-list');
+  const btn  = document.getElementById('photo-menu-btn');
+  const open = list.hidden;
+  list.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+
+function closeMenu() {
+  const list = document.getElementById('photo-menu-list');
+  const btn  = document.getElementById('photo-menu-btn');
+  if (!list.hidden) {
+    list.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
 // ── Load ──────────────────────────────────────────────────────────────────────
 
 /**
- * Loads the photo list from the server and renders the grid.
- * Shows the offline banner if the local server is not reachable.
+ * Loads the folder list + the photos of the current folder from the server,
+ * then renders everything. Shows the offline banner if the local server is
+ * not reachable.
  */
 async function load() {
+  renderHeader();
+
   if (!(await isLocalAvailable())) {
     setOffline(true);
-    render([]);
+    folderList = [];
+    renderFolders();
+    renderGrid([]);
+    renderMenu();
     return;
   }
   setOffline(false);
+
   try {
-    const photos = await (await api('')).json();
-    render(photos);
+    // Fetch folders + photos in parallel — both depend only on the server,
+    // not on each other.
+    const [foldersResp, photosResp] = await Promise.all([
+      folderApi({ method: 'GET' }),
+      api('?folder=' + encodeURIComponent(currentFolder)),
+    ]);
+    folderList = await foldersResp.json();
+    const photos = await photosResp.json();
+    renderFolders();
+    renderGrid(photos);
+    renderMenu();
   } catch {
     setOffline(true);
-    render([]);
+    folderList = [];
+    renderFolders();
+    renderGrid([]);
+    renderMenu();
   }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 /**
- * Wires up the upload button and file input, then loads the gallery.
- * Called once by app.js during boot.
+ * Wires up the upload button, file input, folder navigation, and kebab menu,
+ * then loads the gallery. Called once by app.js during boot.
  */
 export function initPhotos() {
   const input = document.getElementById('photo-input');
@@ -332,6 +550,20 @@ export function initPhotos() {
   input.addEventListener('change', () => {
     uploadFiles(input.files);
     input.value = ''; // allow re-selecting the same file later
+  });
+
+  document.getElementById('photo-back-btn').addEventListener('click', exitFolder);
+
+  document.getElementById('photo-menu-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    toggleMenu();
+  });
+  document.getElementById('photo-menu-newfolder').addEventListener('click', createFolderInteractive);
+  document.getElementById('photo-menu-delfolder').addEventListener('click', deleteFolderInteractive);
+
+  // Click anywhere outside the menu closes it.
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#photo-menu')) closeMenu();
   });
 
   // Refresh the gallery whenever the user navigates to the Photos tab — forces
