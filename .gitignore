@@ -1,5 +1,6 @@
 # Tooling
 .claude/
+old/
 
 # Dependencies
 node_modules/
