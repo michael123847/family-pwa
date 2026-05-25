@@ -50,6 +50,17 @@ export async function boot() {
   // Errors are silently ignored — the app works without a SW.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // The SW posts {type:'open-hauschat'} when the user taps a chat
+    // notification on a window that's already focused. Route to Hauschat.
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'open-hauschat') {
+        window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'hauschat' }));
+      }
+    });
+  }
+  // Also handle direct URL navigation via "./#hauschat" (notificationclick fallback).
+  if (location.hash === '#hauschat') {
+    window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'hauschat' }));
   }
 
   // Weather and departures need the location config from the local server.
@@ -143,6 +154,13 @@ function initTabs() {
   const owner     = document.querySelector(`[data-page="${ownerName}"], [data-subpage="${saved}"]`);
   if (owner && owner.dataset.minRole && !hasRole(owner.dataset.minRole)) saved = 'home';
   show(saved);
+
+  // External navigation requests (e.g., SW notification tap fires this).
+  window.addEventListener('pwa:navigate', e => {
+    if (typeof e.detail === 'string' && document.getElementById('page-' + e.detail)) {
+      show(e.detail);
+    }
+  });
 
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => show(btn.dataset.page));

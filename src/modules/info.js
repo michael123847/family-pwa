@@ -9,8 +9,17 @@
  */
 
 import { CONFIG } from '../config.js';
-import { isLocalAvailable } from '../localBridge.js';
+import { isLocalAvailable, getActiveBase } from '../localBridge.js';
 import { isUltrasoundAvailable } from '../ultrasound.js';
+
+/** Human-readable label for the currently-active server base URL. */
+function connectionPath() {
+  const base = getActiveBase();
+  if (base === CONFIG.LAN_BASE)    return 'Heim-LAN (mDNS)';
+  if (base === CONFIG.LAN_IP_BASE) return 'Heim-LAN (IP)';
+  if (base === CONFIG.TS_BASE)     return 'Tailnet';
+  return base; // fallback — shows the raw URL if it's something else
+}
 
 /** Compact "OS · Browser" label derived from the user agent. */
 function platformLabel() {
@@ -78,9 +87,14 @@ async function render() {
     row('Service Worker', waiting ? swVer + ' · Update bereit' : swVer,
         waiting ? 'warn' : undefined),
     row('Heim-Server',   server ? 'Online' : 'Offline', server ? 'good' : undefined),
+    // Which route are we using right now — LAN_BASE, LAN_IP_BASE, or TS_BASE?
+    // Tone "good" when on a LAN path (faster, no Tailscale hop); plain
+    // otherwise. Useful for spotting unexpected Tailscale fallback at home.
+    row('Verbindung',    connectionPath(),
+        getActiveBase().includes('.local') || getActiveBase().includes('192.168') ? 'good' : undefined),
     row('Ultraschall',   ultrasound ? 'Verfügbar' : 'Nicht verfügbar',
         ultrasound ? 'good' : undefined),
-    row('Verbindung',    navigator.onLine ? 'Online' : 'Offline'),
+    row('Netzwerk',      navigator.onLine ? 'Online' : 'Offline'),
     row('Gerät',         platformLabel()),
   ].join('');
 }

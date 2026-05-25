@@ -31,7 +31,7 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v1.0.35';
+const VERSION   = 'v1.0.38';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 
@@ -152,6 +152,59 @@ self.addEventListener('fetch', e => {
   // ── Public APIs ───────────────────────────────────────────────────────
   // open-meteo and transport.opendata.ch — network-first, cache as fallback.
   e.respondWith(networkFirst(e.request, RUNTIME, 4000));
+});
+
+/**
+ * Push event — fired by the OS when the server sends a Web Push to this
+ * subscription. The payload is the JSON we ship from server.js sendChatPush().
+ *
+ *   { type: 'hauschat', title, body, msgId }
+ *
+ * Shows a notification with a stable tag so multiple incoming messages collapse
+ * into one notification chip on the device. Tapping it routes to the Hauschat
+ * subpage (see notificationclick below).
+ */
+self.addEventListener('push', e => {
+  if (!e.data) return;
+  let data;
+  try { data = e.data.json(); } catch { return; }
+
+  if (data.type === 'hauschat') {
+    e.waitUntil(
+      self.registration.showNotification(data.title || 'Hauschat', {
+        body:  data.body || '',
+        tag:   'hauschat',          // collapse repeats
+        renotify: true,             // but still buzz the device
+        icon:  './icons/icon-192.png',  // best-effort — ok if absent
+        badge: './icons/icon-96.png',
+        data:  { url: './#hauschat' },
+      })
+    );
+  }
+});
+
+/**
+ * Tap handler for notifications. If the PWA is already open in any window,
+ * focus it and dispatch a "pwa:open-hauschat" message so app.js can switch
+ * to the Hauschat subpage. Otherwise open the PWA at the root.
+ */
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({
+      type:            'window',
+      includeUncontrolled: true,
+    });
+    for (const c of allClients) {
+      // Prefer focusing an existing window.
+      try {
+        await c.focus();
+        c.postMessage({ type: 'open-hauschat' });
+        return;
+      } catch { /* fall through to openWindow */ }
+    }
+    await self.clients.openWindow('./#hauschat');
+  })());
 });
 
 /**
