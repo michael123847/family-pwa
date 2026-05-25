@@ -968,6 +968,14 @@ input[type=range]:active::-webkit-slider-thumb {
   flex-wrap: wrap;
   padding-top: 10px;
 }
+/* Always-visible chat actions bar (currently just the push toggle).
+   Sits above the conditional us-bar so it never disappears with it. */
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+}
 .us-btn {
   background: var(--card);
   border: 1px solid var(--card-border);
@@ -1137,6 +1145,18 @@ input[type=range]:active::-webkit-slider-thumb {
   content: '💭 ';
   font-style: normal;
   opacity: 0.75;
+}
+
+/* Quoted blocks lifted out of the response — distinct background with a left
+   accent bar so the family can tell "this is what to copy/paste into the
+   email" at a glance. */
+.ai-msg-quote .ai-bubble {
+  background: rgba(76, 142, 255, 0.08);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px 14px 14px 6px;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.88rem;
+  white-space: pre-wrap;
 }
 
 .ai-msg-user .ai-bubble {

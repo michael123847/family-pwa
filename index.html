@@ -246,10 +246,15 @@
       <div class="chat-offline" id="chat-offline">
         📵 Server nicht erreichbar — Nachrichten werden später gesendet
       </div>
+      <!-- Always-visible bar for push toggle. The us-bar below only shows
+           when the server is unreachable (its visibility is driven by
+           pwa:server events in hauschat.js). -->
+      <div class="chat-actions">
+        <button class="us-btn" id="chat-push-toggle" hidden>🔔 Aktivieren</button>
+      </div>
       <div class="us-bar" id="chat-us-bar">
         <button class="us-btn" id="chat-us-toggle">📡 Ultraschall</button>
         <button class="us-btn us-freq" id="chat-us-freq" hidden>Modus: Ultraschall</button>
-        <button class="us-btn" id="chat-push-toggle" hidden>🔔 Aktivieren</button>
         <span class="us-status" id="chat-us-status"></span>
       </div>
       <div class="chat-input-row">

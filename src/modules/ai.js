@@ -35,6 +35,12 @@ let thinking      = false; // true while waiting for the first token
 let selectedModel = localStorage.getItem(MODEL_KEY) ?? ''; // chosen Ollama model
 let lastError     = ''; // transient — shown until next successful response or user action
 
+// Monotonic counter: each call to send() captures the current value; if the
+// counter advances mid-stream (because the user hit "Gespräch löschen" or
+// switched models), the in-flight send() exits silently and stops mutating
+// history. Without this, "clear" was ignored while AI was generating.
+let sendGen = 0;
+
 // ── Persistence ───────────────────────────────────────────────────────────────
 
 function saveHistory() {
@@ -55,6 +61,41 @@ function esc(s) {
 /** Converts plain text to safe HTML — preserves newlines and code blocks. */
 function fmt(s) {
   return esc(s).replace(/\n/g, '<br>');
+}
+
+/**
+ * Splits an assistant response into segments by quoted spans. Quoted spans
+ * are rendered in their own bubble with a copy button — useful when the AI
+ * drafts an email or message body for the user to paste elsewhere.
+ *
+ * Recognises both ASCII (`"…"`) and German (`„…"`) quotes. Only quoted spans
+ * of meaningful length (≥ 40 chars OR containing a newline) are split out —
+ * short inline quotes stay in the prose bubble where they belong.
+ *
+ * Returns an array of `{ quoted: bool, text: string }` segments preserving
+ * the original order.
+ */
+function splitQuotes(text) {
+  const MIN_QUOTE_LEN = 40;
+  const segments      = [];
+  // Match either "…" or „…" — non-greedy body.
+  const re = /(?:"([^"]+?)"|„([^"]+?)")/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const inside = m[1] ?? m[2];
+    // Skip trivially short inline quotes — keep them inline.
+    if (inside.length < MIN_QUOTE_LEN && !inside.includes('\n')) continue;
+    if (m.index > last) {
+      segments.push({ quoted: false, text: text.slice(last, m.index) });
+    }
+    segments.push({ quoted: true, text: inside });
+    last = re.lastIndex;
+  }
+  if (last < text.length) segments.push({ quoted: false, text: text.slice(last) });
+  if (!segments.length)   segments.push({ quoted: false, text });
+  // Strip empty / whitespace-only segments that result from edge cases.
+  return segments.filter(s => s.text && s.text.trim());
 }
 
 /**
@@ -99,7 +140,9 @@ function render() {
                 ${m.content ? `<button class="ai-copy-btn" data-idx="${i}" title="Kopieren">⎘</button>` : ''}
               </div>`;
     }
-    // Assistant — split think out into its own italic bubble if present.
+    // Assistant — split think out into its own italic bubble if present,
+    // then split the remaining response by quoted spans so long quotes
+    // (email drafts etc.) become their own copy-able bubble.
     const { think, response } = splitThink(m.content);
     let html = '';
     if (think) {
@@ -107,12 +150,27 @@ function render() {
                  <div class="ai-bubble">${fmt(think)}</div>
                </div>`;
     }
-    // Show main bubble only when there's something to put in it — either an
-    // actual response, or no think tag at all (so the user sees the cursor).
-    if (response || !think) {
+    if (response) {
+      const segments = splitQuotes(response);
+      segments.forEach((seg, segIdx) => {
+        const cls       = seg.quoted ? 'ai-msg-assistant ai-msg-quote' : 'ai-msg-assistant';
+        // Each quoted segment gets its own copy button targeting just that span.
+        const copyBtn   = seg.quoted
+          ? `<button class="ai-copy-btn" data-idx="${i}" data-seg="${segIdx}" title="Zitat kopieren">⎘</button>`
+          // Non-quoted segments — only emit a copy button on the LAST one,
+          // and have it copy the full response (without quotes / think).
+          : (segIdx === segments.length - 1
+              ? `<button class="ai-copy-btn" data-idx="${i}" title="Antwort kopieren">⎘</button>`
+              : '');
+        html += `<div class="ai-msg ${cls}">
+                   <div class="ai-bubble">${fmt(seg.text)}</div>
+                   ${copyBtn}
+                 </div>`;
+      });
+    } else if (!think) {
+      // Streaming hasn't started yet — show the cursor.
       html += `<div class="ai-msg ai-msg-assistant">
-                 <div class="ai-bubble">${response ? fmt(response) : '<span class="ai-cursor">▍</span>'}</div>
-                 ${response ? `<button class="ai-copy-btn" data-idx="${i}" title="Kopieren">⎘</button>` : ''}
+                 <div class="ai-bubble"><span class="ai-cursor">▍</span></div>
                </div>`;
     }
     return html;
@@ -133,11 +191,21 @@ function render() {
   list.querySelectorAll('.ai-copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const m = history[Number(btn.dataset.idx)];
-      // For assistant replies, strip the <think>…</think> block so pasting
-      // into an email gives only the final answer.
-      const content = m?.role === 'assistant'
-        ? splitThink(m.content).response
-        : (m?.content ?? '');
+      if (!m) return;
+      let content;
+      if (m.role === 'assistant') {
+        const { response } = splitThink(m.content);
+        if (btn.dataset.seg !== undefined) {
+          // Per-quote copy: just the text of that quoted span.
+          const seg = splitQuotes(response)[Number(btn.dataset.seg)];
+          content = seg?.text ?? '';
+        } else {
+          // Default copy: the whole response stripped of think and quote marks.
+          content = response;
+        }
+      } else {
+        content = m.content ?? '';
+      }
       navigator.clipboard.writeText(content).then(() => {
         btn.textContent = '✓';
         setTimeout(() => btn.textContent = '⎘', 1200);
@@ -205,6 +273,9 @@ function onModelChange(newModel) {
   if (!newModel || newModel === selectedModel) return;
   selectedModel = newModel;
   localStorage.setItem(MODEL_KEY, newModel);
+  // Same invalidation as the explicit Gespräch-löschen path.
+  sendGen++;
+  thinking  = false;
   history   = [];
   lastError = '';
   saveHistory();
@@ -222,6 +293,10 @@ async function send(text) {
 
   // Clear any leftover error from a previous failed send.
   lastError = '';
+
+  // Capture this send's generation. If the user clears the chat or switches
+  // models, sendGen advances and every check below bails out silently.
+  const mySend = ++sendGen;
 
   history.push({ role: 'user', content: text });
   thinking = true;
@@ -259,6 +334,9 @@ async function send(text) {
     }
     const { jobId } = await r.json();
 
+    // If user cleared / switched between POST and now, abandon this send.
+    if (mySend !== sendGen) return;
+
     // 2. Swap the "thinking" cursor for an empty assistant bubble that
     //    polling will fill in.
     thinking = false;
@@ -275,6 +353,10 @@ async function send(text) {
 
     for (;;) {
       await new Promise(r => setTimeout(r, POLL_MS));
+      // User hit "Gespräch löschen" (or changed model) — abandon the loop
+      // and stop appending to aiMsg.
+      if (mySend !== sendGen) return;
+
       let pollR;
       try {
         pollR = await fetch(aiUrl() + '/' + jobId + '?cursor=' + cursor, {
@@ -289,6 +371,7 @@ async function send(text) {
       if (!pollR.ok) throw new Error('HTTP ' + pollR.status);
       const body = await pollR.json();
       pollErrors = 0;
+      if (mySend !== sendGen) return;  // re-check after the await
       if (body.delta) {
         aiMsg.content += body.delta;
         render();
@@ -301,6 +384,8 @@ async function send(text) {
     if (!aiMsg.content) throw new Error('Keine Antwort erhalten.');
 
   } catch (e) {
+    // Don't surface errors from a send that was superseded by a clear.
+    if (mySend !== sendGen) return;
     thinking = false;
     // Drop the empty placeholder if streaming never started — it would
     // render as an empty bubble. Surface the error as transient UI instead.
@@ -334,10 +419,25 @@ export function initAi() {
   document.getElementById('ai-send').addEventListener('click', () => {
     const t = input.value; input.value = ''; send(t);
   });
+  // Enter submits — without this, mobile keyboards do nothing on Enter
+  // because there's no surrounding <form> to auto-submit.
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const t = input.value; input.value = ''; send(t);
+    }
+  });
 
   document.getElementById('ai-clear').addEventListener('click', () => {
-    if (thinking) return;
-    history = []; lastError = ''; saveHistory(); render();
+    // Invalidate any in-flight send() so its polling loop bails out without
+    // re-appending the in-progress response. Also flips thinking back off so
+    // the UI immediately reflects "no active chat".
+    sendGen++;
+    thinking  = false;
+    history   = [];
+    lastError = '';
+    saveHistory();
+    render();
   });
 
   document.getElementById('ai-model').addEventListener('change', e => {
