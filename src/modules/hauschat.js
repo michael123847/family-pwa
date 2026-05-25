@@ -383,6 +383,97 @@ function showChat() {
  * Called once by app.js during boot. If IndexedDB is unavailable the chat
  * stays disabled rather than crashing the rest of the app.
  */
+// ── Push notifications ────────────────────────────────────────────────────────
+
+/** Converts a URL-safe base64 VAPID public key to the Uint8Array PushManager wants. */
+function urlBase64ToUint8Array(b64) {
+  const padding = '='.repeat((4 - b64.length % 4) % 4);
+  const std     = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw     = atob(std);
+  const arr     = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+/** Updates the toggle's label to match the current Notification.permission state. */
+function updatePushLabel(btn, subscribed) {
+  if (Notification.permission === 'denied') {
+    btn.textContent = '🔕 Blockiert';
+    btn.disabled    = true;
+    return;
+  }
+  btn.disabled    = false;
+  btn.textContent = subscribed ? '🔔 An' : '🔔 Aktivieren';
+}
+
+/**
+ * Toggles Web Push subscription for chat messages. Hides the button entirely
+ * if the browser lacks Web Push support (Safari < 16.4, etc.) so it doesn't
+ * confuse users on unsupported platforms.
+ */
+async function setupPushButton() {
+  const btn = document.getElementById('chat-push-toggle');
+  if (!btn) return;
+  // Feature-detect: need Notification API, SW, and PushManager.
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  updatePushLabel(btn, !!sub);
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        // Unsubscribe: remove on server first, then locally.
+        await fetch(getActiveBase() + '/api/push/subscribe', {
+          method:      'DELETE',
+          credentials: 'omit',
+          headers:     authHeaders(),
+        }).catch(() => {});
+        await existing.unsubscribe();
+        updatePushLabel(btn, false);
+        return;
+      }
+      // Subscribe: ask permission, fetch VAPID key, register with PushManager,
+      // then POST the subscription to the server.
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { updatePushLabel(btn, false); return; }
+
+      const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
+        credentials: 'omit', headers: authHeaders(),
+      });
+      if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
+      const { publicKey } = await vapidR.json();
+
+      const newSub = await reg.pushManager.subscribe({
+        userVisibleOnly:      true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
+        method:      'POST',
+        credentials: 'omit',
+        headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+        body:        JSON.stringify({ subscription: newSub.toJSON() }),
+      });
+      if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
+
+      updatePushLabel(btn, true);
+    } catch (e) {
+      console.warn('[push] toggle failed:', e);
+      updatePushLabel(btn, false);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 export async function initHauschat() {
   try { db = await openDB(); }
   catch { return; }
@@ -417,6 +508,8 @@ export async function initHauschat() {
   window.addEventListener('pwa:server', e => applyUsVisibility(e.detail));
   // Apply the cached server status in case pwa:server already fired before this listener.
   isLocalAvailable().then(online => applyUsVisibility(online));
+
+  setupPushButton();
 
   if (device) showChat();
   else        showSetup();

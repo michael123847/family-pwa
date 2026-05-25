@@ -61,6 +61,59 @@ function defaultLabel() {
 }
 
 /**
+ * One-time welcome modal shown right before the first enrollment.
+ * The entered text becomes the device_label on the whitelist row and is
+ * what the admin sees in the admin tool (and what other family devices
+ * could later show, if we surface it). Empty submission falls back to
+ * defaultLabel() — so the user can hit Enter to skip.
+ *
+ * Returns a Promise that resolves with the chosen label.
+ */
+function promptDeviceName() {
+  return new Promise(resolve => {
+    const fallback = defaultLabel();
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;
+                  align-items:center;justify-content:center;z-index:9999;
+                  font:16px system-ui;backdrop-filter:blur(8px)">
+        <form id="welcome-form" style="background:#111827;padding:1.8em 2em;border-radius:16px;
+                  width:min(22em, calc(100vw - 32px));display:flex;flex-direction:column;gap:1em;
+                  border:1px solid rgba(255,255,255,0.12);box-shadow:0 16px 64px rgba(0,0,0,0.6)">
+          <h2 style="margin:0;color:#fff;font-size:1.15rem">👋 Willkommen!</h2>
+          <p style="margin:0;color:#aab;font-size:0.88rem;line-height:1.45">
+            Wie heisst du oder wie soll dieses Gerät genannt werden?<br>
+            (z. B. „Marcs iPhone" oder „Papa-Laptop")
+          </p>
+          <input id="welcome-input" type="text" autocomplete="off" autofocus
+                 maxlength="40" placeholder="${fallback}"
+                 style="font:16px system-ui;padding:.65em .85em;border-radius:9px;
+                        border:1px solid rgba(255,255,255,0.18);background:#1f2937;
+                        color:#fff;outline:none">
+          <button type="submit"
+                  style="padding:.7em;border-radius:9px;border:none;cursor:pointer;
+                         background:#4d88ff;color:#fff;font-size:.95rem;font-weight:600">
+            Weiter
+          </button>
+          <p style="margin:0;color:#666;font-size:.75rem;text-align:center">
+            Leer lassen für „${fallback}" als Standard.
+          </p>
+        </form>
+      </div>`;
+    document.body.appendChild(root);
+
+    const form  = root.querySelector('#welcome-form');
+    const input = root.querySelector('#welcome-input');
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const value = input.value.trim();
+      root.remove();
+      resolve(value || fallback);
+    });
+  });
+}
+
+/**
  * Calls /api/whoami and updates the cached role + label. Returns one of:
  *  - { status: 'ok',       role }     — server validated the token, role cached
  *  - { status: 'rejected'           } — server returned 401 (token not in whitelist)
@@ -120,14 +173,17 @@ async function backgroundRetry(delayMs = 5000) {
  * localStorage. Returns true on success, false on failure (which usually
  * means the server is unreachable — the PWA should fall back to its
  * read-only public-API features in that case).
+ *
+ * @param {string} [label] — explicit device label (from the welcome prompt).
+ *                            Falls back to defaultLabel() if not given.
  */
-async function enroll() {
+async function enroll(label) {
   try {
     const r = await fetch(getActiveBase() + '/api/enroll-self', {
       method:  'POST',
       cache:   'no-store',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ device_label: defaultLabel() }),
+      body:    JSON.stringify({ device_label: label || defaultLabel() }),
     });
     if (!r.ok) return false;
     const body = await r.json();
@@ -184,12 +240,19 @@ export async function ensureEnrolled() {
     // status === 'rejected' → server explicitly said the token is unknown.
     clearToken();
   }
-  const ok = await enroll();
+  // No (valid) token in localStorage → first-time enrollment on this device.
+  // Ask the user for a friendly name first so the admin tool shows something
+  // meaningful instead of just "Android" / "iPhone".
+  const label = await promptDeviceName();
+  const ok = await enroll(label);
   if (!ok) {
     // Couldn't enroll. UI will load with role="" and most subapps hidden.
     // Wetter / Abfahrten / Farben work without a token (public APIs).
-    // Schedule a retry — server may come up shortly.
+    // Schedule a retry — server may come up shortly. Reuse the label so the
+    // user doesn't get re-prompted.
     console.warn('Enrollment failed — running in degraded mode, will retry.');
-    setTimeout(ensureEnrolled, 10_000);
+    setTimeout(() => enroll(label).then(ok => {
+      if (!ok) setTimeout(ensureEnrolled, 10_000);
+    }), 10_000);
   }
 }

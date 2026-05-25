@@ -206,7 +206,7 @@
     </div>
     <div class="photo-actions">
       <button class="photo-upload-btn" id="share-upload-btn">+ Datei hochladen (max. 10 MB)</button>
-      <input type="file" id="share-input" multiple hidden>
+      <input type="file" id="share-input" multiple hidden accept="*/*">
     </div>
     <div class="offline-banner" id="share-offline-banner">
       📵 Nicht im Heim-WLAN — Ablage nicht verfügbar
@@ -249,6 +249,7 @@
       <div class="us-bar" id="chat-us-bar">
         <button class="us-btn" id="chat-us-toggle">📡 Ultraschall</button>
         <button class="us-btn us-freq" id="chat-us-freq" hidden>Modus: Ultraschall</button>
+        <button class="us-btn" id="chat-push-toggle" hidden>🔔 Aktivieren</button>
         <span class="us-status" id="chat-us-status"></span>
       </div>
       <div class="chat-input-row">

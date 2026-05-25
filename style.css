@@ -1123,6 +1123,22 @@ input[type=range]:active::-webkit-slider-thumb {
   line-height: 1.55;
   word-break: break-word;
 }
+/* Reasoning models prefix replies with a <think>…</think> block. The thinking
+   is shown in its own bubble before the main response. Italic + dim + a small
+   💭 prefix to distinguish it. */
+.ai-msg-think .ai-bubble {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--card-border);
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.82rem;
+}
+.ai-msg-think .ai-bubble::before {
+  content: '💭 ';
+  font-style: normal;
+  opacity: 0.75;
+}
+
 .ai-msg-user .ai-bubble {
   background: var(--accent);
   color: #fff;
