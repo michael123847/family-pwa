@@ -16,7 +16,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v1.0.40',
+  APP_VERSION: 'v1.0.41',
 
   // ── Local server — two reachable hostnames ─────────────────────────
   // The server is served by Caddy on the same port under two names:
