@@ -30,8 +30,14 @@ let _lastCheck = 0;
 // How long to trust the cached result before sending a new health check.
 const TTL = 30_000; // 30 seconds
 
-// Resolved base URL for the session. null until probeBase() runs at boot.
-let _activeBase = null;
+// Persisted across page loads — last base URL that successfully answered the
+// health probe. On cold boot, getActiveBase() returns this BEFORE probeBase()
+// completes, so isLocalAvailable() and the modules start with a sensible
+// guess instead of falling through to TS_BASE every time.
+const ACTIVE_BASE_KEY = 'pwa.activeBase';
+let _activeBase = (() => {
+  try { return localStorage.getItem(ACTIVE_BASE_KEY); } catch { return null; }
+})();
 
 /**
  * Returns the Authorization header needed for local server requests.
@@ -55,25 +61,33 @@ export function getActiveBase() {
 }
 
 /**
- * Probes the LAN paths in priority order:
- *   1. LAN_BASE     (server.local, via mDNS) — preferred name
- *   2. LAN_IP_BASE  (192.168.1.29)           — bypass mDNS quirks
- *   3. TS_BASE      (server.tail2636e9.ts.net) — fallback, always reachable on tailnet
+ * Probes all candidate base URLs IN PARALLEL and uses whichever responds
+ * first:
+ *   - LAN_BASE     (server.local, mDNS)
+ *   - LAN_IP_BASE  (192.168.1.x, bypass mDNS)
+ *   - TS_BASE      (server.<tailnet>.ts.net)
  *
- * For each candidate we GET /api/health with a short timeout. Any HTTP
- * response (even 401) proves TLS + routing work. Stops at the first hit.
+ * Sequential probing wasted up to 3 s on phones that aren't on the home
+ * LAN — the two unreachable candidates each had to time out before
+ * Tailscale got a chance. Racing them with Promise.any() collapses the
+ * total wait to roughly the fastest candidate's response time
+ * (typically ~300-700 ms on cellular Tailscale, near-zero on LAN).
  *
- * Console logs each attempt so connectivity issues are visible in DevTools
- * (look for "[probeBase]"). Called at boot (main.js, before module init)
- * and on every 'online' event.
+ * Any HTTP response (including 401) counts as success — we just need to
+ * prove TLS + routing work. Console logs each attempt as "[probeBase]"
+ * so unreachable paths are visible in DevTools.
+ *
+ * Persists the winning base in localStorage as a hint for faster future
+ * isLocalAvailable() decisions on cold start (before this probe completes).
  */
 export async function probeBase() {
   const candidates = [CONFIG.LAN_BASE, CONFIG.LAN_IP_BASE, CONFIG.TS_BASE];
-  let chose = CONFIG.TS_BASE; // last-resort default
+  const timeout    = CONFIG.HEALTH_TIMEOUT_MS;
 
-  for (const base of candidates) {
+  // Each racer resolves with its base URL on success, rejects on failure.
+  const racers = candidates.map(async base => {
     const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
+    const timer = setTimeout(() => ctrl.abort(), timeout);
     try {
       const r = await fetch(base + CONFIG.LOCAL_HEALTH_PATH, {
         signal:      ctrl.signal,
@@ -81,19 +95,26 @@ export async function probeBase() {
         credentials: 'omit',
       });
       console.log(`[probeBase] ${base} → HTTP ${r.status}`);
-      chose = base;
-      clearTimeout(timer);
-      break;
+      return base;
     } catch (e) {
       console.log(`[probeBase] ${base} → failed: ${e?.message || e}`);
+      throw e;
+    } finally {
       clearTimeout(timer);
-      // try next candidate
     }
+  });
+
+  let chose;
+  try {
+    chose = await Promise.any(racers); // first success wins
+  } catch {
+    chose = CONFIG.TS_BASE; // all candidates failed — last-resort default
   }
 
   const previous = _activeBase;
   _activeBase = chose;
   console.log(`[probeBase] active base = ${chose}`);
+  try { localStorage.setItem(ACTIVE_BASE_KEY, chose); } catch {}
   if (previous !== chose) invalidateLocal();
 }
 
