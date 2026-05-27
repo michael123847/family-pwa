@@ -1,6 +1,8 @@
 # Tooling
 .claude/
-old/
+# Archived material kept locally (legacy code, planning notes) but not
+# shipped on GitHub. Renamed from old/ in the May-2026 reorg.
+archive/
 
 # Dependencies
 node_modules/

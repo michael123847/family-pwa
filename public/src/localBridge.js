@@ -3,13 +3,16 @@
  *
  * Two responsibilities:
  *
- *  1. **Base-URL routing.** The server is reachable under two hostnames:
- *     `LAN_BASE` (mDNS, only on home Wi-Fi) and `TS_BASE` (Tailscale, anywhere
- *     on the tailnet). At startup we probe LAN_BASE with a short timeout; if
- *     it answers, the session prefers LAN to keep large uploads / photo loads
- *     off the Tailscale tunnel. On failure we fall back to TS_BASE.
- *     getActiveBase() returns the resolved URL; callers should use it instead
- *     of CONFIG.LOCAL_BASE so a network change automatically reroutes traffic.
+ *  1. **Base-URL routing.** The server is reachable under three hostnames,
+ *     but only one is hard-coded in the public bundle:
+ *       - `CONFIG.LAN_BASE` (server.local, mDNS) — always known.
+ *       - `bases.lan_ip` (direct LAN IP) and `bases.ts` (Tailscale MagicDNS)
+ *         are fetched from /api/config on first contact and cached in
+ *         localStorage; see siteConfig.js.
+ *     probeBase() races whichever candidates are currently available; the
+ *     first to answer wins, and the choice is persisted across reloads so
+ *     a cold start doesn't have to race again. On failure we fall back to
+ *     the cached Tailscale URL (works off the home network) or LAN_BASE.
  *
  *  2. **Availability + auth helpers.** isLocalAvailable() pings /api/health
  *     (cached 30 s) so UI can show offline banners. authHeaders() returns the
@@ -33,7 +36,7 @@ const TTL = 30_000; // 30 seconds
 // Persisted across page loads — last base URL that successfully answered the
 // health probe. On cold boot, getActiveBase() returns this BEFORE probeBase()
 // completes, so isLocalAvailable() and the modules start with a sensible
-// guess instead of falling through to TS_BASE every time.
+// guess instead of falling through to the cached Tailscale URL every time.
 const ACTIVE_BASE_KEY = 'pwa.activeBase';
 let _activeBase = (() => {
   try { return localStorage.getItem(ACTIVE_BASE_KEY); } catch { return null; }
@@ -53,22 +56,39 @@ export function authHeaders() {
 
 /**
  * Returns the base URL the rest of the app should use for server calls.
- * Before probeBase() resolves, falls back to TS_BASE — that always works
- * on the tailnet, just adds a tiny encryption hop on home Wi-Fi.
+ * Before probeBase() resolves: prefer the persisted active base from the
+ * previous session, else the cached Tailscale URL (works off-LAN), else
+ * LAN_BASE as a last resort.
  */
 export function getActiveBase() {
-  return _activeBase ?? CONFIG.TS_BASE;
+  if (_activeBase) return _activeBase;
+  const bases = readCachedBases();
+  return bases.ts || CONFIG.LAN_BASE;
+}
+
+// Same localStorage key siteConfig.js writes to. Kept inline here (rather
+// than imported) to avoid the localBridge ↔ siteConfig circular dependency
+// — both modules just read this one key.
+const BASES_KEY = 'pwa.bases';
+function readCachedBases() {
+  try { return JSON.parse(localStorage.getItem(BASES_KEY)) || {}; }
+  catch { return {}; }
 }
 
 /**
  * Probes all candidate base URLs IN PARALLEL and uses whichever responds
  * first:
- *   - LAN_BASE     (server.local, mDNS)
- *   - LAN_IP_BASE  (192.168.1.x, bypass mDNS)
- *   - TS_BASE      (server.<tailnet>.ts.net)
+ *   - LAN_BASE                       (server.local, mDNS)
+ *   - bases.lan_ip from /api/config  (cached LAN IP, bypasses mDNS)
+ *   - bases.ts     from /api/config  (Tailscale MagicDNS hostname)
  *
- * Sequential probing wasted up to 3 s on phones that aren't on the home
- * LAN — the two unreachable candidates each had to time out before
+ * Only LAN_BASE is hard-coded; the other two are cached in localStorage
+ * after the first successful /api/config fetch (see siteConfig.js). On a
+ * brand-new install with no cached bases, probeBase() races LAN_BASE alone
+ * — which works on any device that does mDNS on the home Wi-Fi.
+ *
+ * Sequential probing used to waste up to 3 s on phones that aren't on the
+ * home LAN — the unreachable candidates each had to time out before
  * Tailscale got a chance. Racing them with Promise.any() collapses the
  * total wait to roughly the fastest candidate's response time
  * (typically ~300-700 ms on cellular Tailscale, near-zero on LAN).
@@ -81,7 +101,8 @@ export function getActiveBase() {
  * isLocalAvailable() decisions on cold start (before this probe completes).
  */
 export async function probeBase() {
-  const candidates = [CONFIG.LAN_BASE, CONFIG.LAN_IP_BASE, CONFIG.TS_BASE];
+  const bases = readCachedBases();
+  const candidates = [CONFIG.LAN_BASE, bases.lan_ip, bases.ts].filter(Boolean);
   const timeout    = CONFIG.HEALTH_TIMEOUT_MS;
 
   // Each racer resolves with its base URL on success, rejects on failure.
@@ -108,7 +129,11 @@ export async function probeBase() {
   try {
     chose = await Promise.any(racers); // first success wins
   } catch {
-    chose = CONFIG.TS_BASE; // all candidates failed — last-resort default
+    // All candidates failed. Prefer the cached Tailscale URL if we have one
+    // (works off the home network); otherwise fall back to LAN_BASE — the
+    // PWA will run in degraded / public-API-only mode until mDNS reaches
+    // the server again.
+    chose = bases.ts || CONFIG.LAN_BASE;
   }
 
   const previous = _activeBase;

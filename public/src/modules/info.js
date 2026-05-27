@@ -10,15 +10,23 @@
 
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, getActiveBase } from '../localBridge.js';
+import { getCachedBases } from '../siteConfig.js';
 import { isUltrasoundAvailable } from '../ultrasound.js';
 
 /** Human-readable label for the currently-active server base URL. */
 function connectionPath() {
-  const base = getActiveBase();
-  if (base === CONFIG.LAN_BASE)    return 'Heim-LAN (mDNS)';
-  if (base === CONFIG.LAN_IP_BASE) return 'Heim-LAN (IP)';
-  if (base === CONFIG.TS_BASE)     return 'Tailnet';
-  return base; // fallback — shows the raw URL if it's something else
+  const base  = getActiveBase();
+  const bases = getCachedBases();
+  if (base === CONFIG.LAN_BASE) return 'Heim-LAN (mDNS)';
+  if (base === bases.lan_ip)    return 'Heim-LAN (IP)';
+  if (base === bases.ts)        return 'Tailnet';
+  // Heuristic fallback when nothing exact matches (e.g. base from a previous
+  // session with an old cached URL): classify by URL shape rather than
+  // showing the raw URL, which would leak it into screenshots.
+  if (/^https?:\/\/[^/]+\.local/.test(base))   return 'Heim-LAN (mDNS)';
+  if (/^https?:\/\/192\.168\./.test(base))     return 'Heim-LAN (IP)';
+  if (/^https?:\/\/[^/]+\.ts\.net/.test(base)) return 'Tailnet';
+  return 'Unbekannt';
 }
 
 /** Compact "OS · Browser" label derived from the user agent. */
@@ -87,16 +95,19 @@ async function render() {
     row('Service Worker', waiting ? swVer + ' · Update bereit' : swVer,
         waiting ? 'warn' : undefined),
     row('Heim-Server',   server ? 'Online' : 'Offline', server ? 'good' : undefined),
-    // Which route are we using right now — LAN_BASE, LAN_IP_BASE, or TS_BASE?
-    // Tone "good" when on a LAN path (faster, no Tailscale hop); plain
-    // otherwise. Useful for spotting unexpected Tailscale fallback at home.
+    // Which route are we using right now — LAN_BASE, cached LAN-IP, or
+    // Tailscale? "good" tone when on a LAN path (faster, no Tailscale hop).
     row('Verbindung',    connectionPath(),
-        getActiveBase().includes('.local') || getActiveBase().includes('192.168') ? 'good' : undefined),
+        /\.local|192\.168\./.test(getActiveBase()) ? 'good' : undefined),
     row('Ultraschall',   ultrasound ? 'Verfügbar' : 'Nicht verfügbar',
         ultrasound ? 'good' : undefined),
     row('Netzwerk',      navigator.onLine ? 'Online' : 'Offline'),
     row('Gerät',         platformLabel()),
-  ].join('');
+  ].join('') + `
+    <div class="info-attrib">
+      Wetterdaten: <a href="https://open-meteo.com/" rel="noopener" target="_blank">Open-Meteo</a> (CC&nbsp;BY&nbsp;4.0).
+      Abfahrten: <a href="https://transport.opendata.ch/" rel="noopener" target="_blank">transport.opendata.ch</a>.
+    </div>`;
 }
 
 /**
