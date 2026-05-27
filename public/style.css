@@ -1058,6 +1058,25 @@ input[type=range]:active::-webkit-slider-thumb {
 .info-btn:active { transform: scale(0.98); }
 .info-btn-warn { color: #ffb800; border-color: rgba(255,180,0,0.3); }
 
+/* Small attribution line at the bottom of the Info list — required by the
+   non-commercial terms of Open-Meteo (CC BY 4.0) and a courtesy nod to
+   transport.opendata.ch. */
+.info-attrib {
+  margin-top: 18px;
+  padding: 0 4px;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: center;
+}
+.info-attrib a {
+  color: var(--text-dim);
+  text-decoration: underline;
+}
+.info-attrib a:hover {
+  color: var(--text);
+}
+
 /* ── Audiotest subpage ────────────────────────────────────────────── */
 .audiotest-hint {
   font-size: 0.85rem;

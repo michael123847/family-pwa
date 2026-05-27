@@ -4,10 +4,18 @@
  * All URLs, coordinates, and authentication parameters are defined here so
  * that changing a value in one place affects the entire app.
  *
- * Security note: SALT and EXPECTED_HASH_B64 are intentionally stored in
- * plain text. The security of the password gate comes from the high PBKDF2
- * iteration count (200 000), which makes brute-force attacks very slow, not
- * from keeping the hash secret.
+ * Security note about server URLs:
+ *   Only LAN_BASE (the generic mDNS hostname server.local) is hard-coded
+ *   here. The direct LAN IP and the Tailscale MagicDNS name are NOT shipped
+ *   in the public GitHub Pages bundle — they would identify the home
+ *   network's IP / tailnet name to anyone reading the JS. Instead, the PWA
+ *   fetches them at runtime from the local server's /api/config endpoint
+ *   (gated by the whitelist token) and caches them in localStorage. See
+ *   src/siteConfig.js and src/localBridge.js -> probeBase().
+ *
+ *   Bootstrap path for a fresh install: device must be on the home Wi-Fi
+ *   so mDNS resolves server.local; after one successful connection the
+ *   bases are cached and subsequent cold starts work without mDNS.
  */
 
 export const CONFIG = {
@@ -18,24 +26,18 @@ export const CONFIG = {
   // deploy — they should always match.
   APP_VERSION: 'v1.0.42',
 
-  // ── Local server — two reachable hostnames ─────────────────────────
-  // The server is served by Caddy on the same port under two names:
-  //   LAN_BASE — mDNS hostname, only reachable on the home Wi-Fi
-  //   TS_BASE  — Tailscale MagicDNS name, reachable from anywhere on the
-  //              tailnet (and direct-LAN-routed when the device is at home)
-  // At startup, localBridge probes LAN_BASE with a short timeout. If the
-  // probe succeeds the session uses LAN_BASE; otherwise it falls back to
-  // TS_BASE. See src/localBridge.js -> probeBase() and getActiveBase().
+  // ── Local server — only the generic mDNS hostname is public ────────
+  // LAN_BASE  — mDNS hostname, works on the home Wi-Fi on devices that
+  //             do mDNS resolution (most do).
+  // The cached direct-LAN-IP base and the Tailscale base are loaded from
+  // /api/config -> bases on first successful connection; see siteConfig.js
+  // (getCachedBases) and localBridge.js (probeBase).
   LAN_BASE:          'https://server.local:8443',
-  // Direct LAN IP — used as a fallback when mDNS resolution of server.local
-  // doesn't make it across (some phones cache stale Bonjour entries).
-  // Update this if your router ever reassigns the server's address.
-  LAN_IP_BASE:       'https://192.168.1.5:8443',
-  TS_BASE:           'https://server.tail2636e9.ts.net:8443',
-  // Kept as a fallback / convenience: any code that imports CONFIG.LOCAL_BASE
-  // without going through getActiveBase() will at least pick the Tailscale
-  // hostname, which works everywhere on the tailnet.
-  LOCAL_BASE:        'https://server.tail2636e9.ts.net:8443',
+  // Fallback used when no cached bases are available yet. We pick LAN_BASE
+  // because that's the only base the public bundle knows; if mDNS fails on
+  // a fresh install the PWA degrades to public-only features (Wetter /
+  // Abfahrten / Farben) until it can reach the server once.
+  LOCAL_BASE:        'https://server.local:8443',
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
   LOCAL_PHOTOS_PATH: '/api/photos',   // upload / list / download endpoint for the photo gallery

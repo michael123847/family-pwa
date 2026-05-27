@@ -25,7 +25,10 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          # Only the contents of public/ are deployed. Repo root holds
+          # README, LICENSE, archive/, .github/, etc. — none of which should
+          # be served to browsers.
+          path: ./public
 
   deploy:
     needs: build

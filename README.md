@@ -21,30 +21,52 @@ Zugangsschlüssel.
 Rollen-basiert (Visitor / Family / Power / Admin) — die ersten beiden ohne
 Server-Zugriff.
 
+## Repo-Layout
+
+Seit der Mai-2026-Reorg:
+
+```
+family-pwa/
+├── LICENSE                ← MIT
+├── README.md
+├── .github/workflows/     ← Pages-Deploy (publisht ./public)
+├── public/                ← alles, was an den Browser ausgeliefert wird
+│   ├── index.html
+│   ├── style.css
+│   ├── sw.js
+│   ├── manifest.webmanifest
+│   ├── src/               ← App-Code
+│   ├── vendor/ggwave/     ← Ultraschall-Bibliothek (MIT)
+│   └── setup/             ← Root-CA-Download für Endgeräte
+└── archive/               ← lokales, gitignored Material (Legacy-Code, Notizen)
+```
+
 ## Setup
 
-Frontend hier ist statisches HTML/JS, kein Build-Schritt. Service-Worker
-bringt App-Shell-Cache und Push-Empfang mit.
+Frontend ist statisches HTML/JS, kein Build-Schritt. Service-Worker bringt
+App-Shell-Cache und Push-Empfang mit.
 
 ```bash
-python -m http.server 8000   # für lokale Tests; live läuft es auf GitHub Pages
+cd public && python -m http.server 8000   # lokale Tests; live läuft es auf GitHub Pages
 ```
 
 Vollständige Einrichtung (mkcert, Caddy, Express, Bonjour, Tailscale,
 NSSM-Dienste): siehe `family-pwa-server` (privates Repo).
 
 Auf jedem Endgerät einmalig die mkcert-CA installieren über die Seite unter
-[`setup/`](setup/).
+[`public/setup/`](public/setup/) (live URL: `<eure-pages-domain>/setup/`).
 
-Ultraschall-Bibliothek (`vendor/ggwave/ggwave.js`) wird nicht mitgeliefert —
-siehe [`vendor/ggwave/README.md`](vendor/ggwave/README.md). Ohne sie bleibt
-die Ultraschall-Funktion ausgeblendet, der Rest läuft normal.
+Ultraschall-Bibliothek (`public/vendor/ggwave/ggwave.js`) wird nicht
+mitgeliefert — siehe [`public/vendor/ggwave/README.md`](public/vendor/ggwave/README.md).
+Ohne sie bleibt die Ultraschall-Funktion ausgeblendet, der Rest läuft normal.
 
 ## Versionierung
 
-`src/config.js` → `APP_VERSION` und `sw.js` → `VERSION` werden bei jedem
-Deploy gemeinsam hochgezählt; die Info-Subapp zeigt beide an.
+`public/src/config.js` → `APP_VERSION` und `public/sw.js` → `VERSION` werden
+bei jedem Deploy gemeinsam hochgezählt; die Info-Subapp zeigt beide an.
 
 ## Deployment
 
 GitHub Pages via Actions ([`.github/workflows/pages.yml`](.github/workflows/pages.yml)).
+Workflow uploadet `./public` als Pages-Artefakt — der Repo-Root (README,
+LICENSE, archive/) bleibt unsichtbar für Besucher.
