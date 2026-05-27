@@ -19,9 +19,12 @@
 
 import { getActiveBase } from './localBridge.js';
 
-const STORAGE_KEY = 'pwa.auth.token';
-const ROLE_KEY    = 'pwa.auth.role';    // cached role for offline-resilient UI
-const LABEL_KEY   = 'pwa.auth.label';   // cached device label
+const STORAGE_KEY    = 'pwa.auth.token';
+const ROLE_KEY       = 'pwa.auth.role';      // cached role for offline-resilient UI
+const LABEL_KEY      = 'pwa.auth.label';     // cached device label
+// Survives clearToken() so a returning device can silently re-enroll
+// without showing the welcome dialog again.
+const PREV_LABEL_KEY = 'pwa.auth.prevlabel';
 
 // Role hierarchy — kept in sync with server.js ROLES.
 export const ROLES = ['Visitor', 'Family', 'Power', 'Admin'];
@@ -42,6 +45,10 @@ export function getRole()  { return localStorage.getItem(ROLE_KEY) ?? ''; }
 export function getLabel() { return localStorage.getItem(LABEL_KEY) ?? ''; }
 
 export function clearToken() {
+  // Preserve the label under a separate key so re-enrollment can reuse it
+  // without showing the welcome dialog on what is really a returning device.
+  const label = localStorage.getItem(LABEL_KEY);
+  if (label) localStorage.setItem(PREV_LABEL_KEY, label);
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(ROLE_KEY);
   localStorage.removeItem(LABEL_KEY);
@@ -151,16 +158,28 @@ async function refreshWhoami() {
  * Background retry: keeps trying /api/whoami until it succeeds (or the token
  * is rejected). Used after a cold-start soft-fail so the PWA doesn't stay
  * stuck with a stale cached role for an entire session.
+ *
+ * When the server comes back and explicitly rejects the token (e.g. whitelist
+ * was reset while offline), we silently re-enroll using the preserved label
+ * instead of leaving the device in a tokenless, "offline" state until the
+ * user manually reloads the page.
  */
 async function backgroundRetry(delayMs = 5000) {
   while (true) {
     await new Promise(r => setTimeout(r, delayMs));
     const result = await refreshWhoami();
-    if (result.status === 'ok')        return;
+    if (result.status === 'ok') return;
     if (result.status === 'rejected') {
-      // Token's actually gone — clear and let the next reload re-enroll.
+      // clearToken() saves the label to PREV_LABEL_KEY before wiping it.
       clearToken();
-      console.warn('Background whoami: token rejected, cleared. Reload to re-enroll.');
+      console.warn('Background whoami: token rejected — silently re-enrolling.');
+      const label = localStorage.getItem(PREV_LABEL_KEY) || defaultLabel();
+      const ok = await enroll(label);
+      if (ok) {
+        await refreshWhoami(); // refresh role in localStorage
+      } else {
+        console.warn('Silent re-enrollment failed — reload to retry.');
+      }
       return;
     }
     // Still failing — back off a bit, max 60s between retries.
@@ -200,11 +219,21 @@ async function enroll(label) {
  * Re-runs /api/whoami when the page comes back to the foreground. Picks up
  * an admin promotion (or demotion) without the user having to fully relaunch
  * the PWA — just switching away + back is enough.
+ *
+ * If there is no token (backgroundRetry cleared it after a rejection), we
+ * attempt a silent re-enrollment so the device heals without a page reload.
  */
 function watchVisibility() {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && getToken()) {
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (getToken()) {
       refreshWhoami(); // best-effort; fires pwa:role-changed on its own if role updated
+    } else {
+      // Token was cleared (backgroundRetry or explicit revocation). Re-enroll
+      // silently using the label the device had before — no welcome dialog.
+      const label = localStorage.getItem(PREV_LABEL_KEY) || defaultLabel();
+      const ok = await enroll(label);
+      if (ok) refreshWhoami();
     }
   });
 }
@@ -238,11 +267,24 @@ export async function ensureEnrolled() {
       return;
     }
     // status === 'rejected' → server explicitly said the token is unknown.
+    // clearToken() saves the label to PREV_LABEL_KEY before wiping everything.
     clearToken();
   }
-  // No (valid) token in localStorage → first-time enrollment on this device.
-  // Ask the user for a friendly name first so the admin tool shows something
-  // meaningful instead of just "Android" / "iPhone".
+
+  // No (valid) token. Check whether this device has enrolled before.
+  const prevLabel = localStorage.getItem(PREV_LABEL_KEY);
+  if (prevLabel) {
+    // Re-enrollment after token eviction (whitelist reset, etc.).  Skip the
+    // welcome dialog — the user already gave a name and showing it again is
+    // confusing.
+    const ok = await enroll(prevLabel);
+    if (ok) return;
+    // Server unreachable; fall through to the welcome dialog so the user at
+    // least knows the app is trying.
+  }
+
+  // Truly first install on this browser — show the welcome dialog so the
+  // admin tool gets something meaningful instead of just "Android"/"iPhone".
   const label = await promptDeviceName();
   const ok = await enroll(label);
   if (!ok) {
