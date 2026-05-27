@@ -174,9 +174,11 @@ async function backgroundRetry(delayMs = 5000) {
       clearToken();
       console.warn('Background whoami: token rejected — silently re-enrolling.');
       const label = localStorage.getItem(PREV_LABEL_KEY) || defaultLabel();
-      const ok = await enroll(label);
-      if (ok) {
+      const er = await enroll(label);
+      if (er.status === 'ok') {
         await refreshWhoami(); // refresh role in localStorage
+      } else if (er.status === 'rate-limited') {
+        console.warn(`Silent re-enroll rate-limited — retry in ${er.retryAfter}s.`);
       } else {
         console.warn('Silent re-enrollment failed — reload to retry.');
       }
@@ -188,10 +190,16 @@ async function backgroundRetry(delayMs = 5000) {
 }
 
 /**
- * Enrolls this device as a Visitor. Stores the returned token + role in
- * localStorage. Returns true on success, false on failure (which usually
- * means the server is unreachable — the PWA should fall back to its
- * read-only public-API features in that case).
+ * Enrolls this device. On success, stores the returned token + role in
+ * localStorage. Returns a discriminated status so callers can react to a
+ * rate-limit specifically (the welcome dialog needs to show a different
+ * message than a generic network failure — silently looping back to the
+ * dialog after a 429 makes the device look broken).
+ *
+ * Returned shape:
+ *   { status: 'ok' }
+ *   { status: 'rate-limited', retryAfter: <seconds> }
+ *   { status: 'failed' }       // any other non-OK HTTP, or network error
  *
  * @param {string} [label] — explicit device label (from the welcome prompt).
  *                            Falls back to defaultLabel() if not given.
@@ -204,15 +212,58 @@ async function enroll(label) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ device_label: label || defaultLabel() }),
     });
-    if (!r.ok) return false;
+    if (r.status === 429) {
+      const body = await r.json().catch(() => ({}));
+      return { status: 'rate-limited', retryAfter: body.retry_after ?? 300 };
+    }
+    if (!r.ok) return { status: 'failed' };
     const body = await r.json();
     localStorage.setItem(STORAGE_KEY, body.token);
     localStorage.setItem(ROLE_KEY,    body.role  ?? 'Visitor');
     localStorage.setItem(LABEL_KEY,   body.device_label ?? '');
-    return true;
+    return { status: 'ok' };
   } catch {
-    return false;
+    return { status: 'failed' };
   }
+}
+
+/**
+ * Tiny modal explaining why enrollment was rejected with HTTP 429. Same
+ * visual treatment as promptDeviceName() so it doesn't look like a generic
+ * browser alert. Resolves when the user dismisses it; we don't auto-retry
+ * because the cooldown is too long (default 5 min) to hold the page in
+ * limbo — the user is expected to come back and reload.
+ */
+function showRateLimitMessage(retryAfterSec) {
+  return new Promise(resolve => {
+    const min = Math.max(1, Math.ceil(retryAfterSec / 60));
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;
+                  align-items:center;justify-content:center;z-index:9999;
+                  font:16px system-ui;backdrop-filter:blur(8px)">
+        <div style="background:#111827;padding:1.8em 2em;border-radius:16px;
+                    width:min(22em, calc(100vw - 32px));display:flex;flex-direction:column;
+                    gap:1em;border:1px solid rgba(255,255,255,0.12);
+                    box-shadow:0 16px 64px rgba(0,0,0,0.6)">
+          <h2 style="margin:0;color:#fff;font-size:1.15rem">⏳ Anmeldung gerade nicht möglich</h2>
+          <p style="margin:0;color:#aab;font-size:0.88rem;line-height:1.45">
+            Der Server begrenzt neue Anmeldungen auf eine alle paar Minuten pro Gerät.
+            Bitte ca. ${min} Minute${min > 1 ? 'n' : ''} warten und die App dann neu laden.
+          </p>
+          <button id="rl-ok" type="button"
+                  style="padding:.7em;border-radius:9px;border:none;cursor:pointer;
+                         background:#4d88ff;color:#fff;font-size:.95rem;font-weight:600">
+            Verstanden
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+    root.querySelector('#rl-ok').addEventListener('click', () => {
+      root.remove();
+      resolve();
+    });
+  });
 }
 
 /**
@@ -232,8 +283,11 @@ function watchVisibility() {
       // Token was cleared (backgroundRetry or explicit revocation). Re-enroll
       // silently using the label the device had before — no welcome dialog.
       const label = localStorage.getItem(PREV_LABEL_KEY) || defaultLabel();
-      const ok = await enroll(label);
-      if (ok) refreshWhoami();
+      const er = await enroll(label);
+      if (er.status === 'ok') refreshWhoami();
+      else if (er.status === 'rate-limited') {
+        console.warn(`visibility re-enroll rate-limited — retry in ${er.retryAfter}s.`);
+      }
     }
   });
 }
@@ -277,24 +331,35 @@ export async function ensureEnrolled() {
     // Re-enrollment after token eviction (whitelist reset, etc.).  Skip the
     // welcome dialog — the user already gave a name and showing it again is
     // confusing.
-    const ok = await enroll(prevLabel);
-    if (ok) return;
-    // Server unreachable; fall through to the welcome dialog so the user at
-    // least knows the app is trying.
+    const er = await enroll(prevLabel);
+    if (er.status === 'ok') return;
+    if (er.status === 'rate-limited') {
+      // The user is staring at the page; explain what happened instead of
+      // dropping them into the welcome dialog as if they were a new device.
+      await showRateLimitMessage(er.retryAfter);
+      return;
+    }
+    // Server unreachable or other failure; fall through to the welcome dialog
+    // so the user at least knows the app is trying.
   }
 
   // Truly first install on this browser — show the welcome dialog so the
   // admin tool gets something meaningful instead of just "Android"/"iPhone".
   const label = await promptDeviceName();
-  const ok = await enroll(label);
-  if (!ok) {
+  const er = await enroll(label);
+  if (er.status === 'rate-limited') {
+    await showRateLimitMessage(er.retryAfter);
+    return;
+  }
+  if (er.status !== 'ok') {
     // Couldn't enroll. UI will load with role="" and most subapps hidden.
     // Wetter / Abfahrten / Farben work without a token (public APIs).
     // Schedule a retry — server may come up shortly. Reuse the label so the
     // user doesn't get re-prompted.
     console.warn('Enrollment failed — running in degraded mode, will retry.');
-    setTimeout(() => enroll(label).then(ok => {
-      if (!ok) setTimeout(ensureEnrolled, 10_000);
-    }), 10_000);
+    setTimeout(async () => {
+      const er2 = await enroll(label);
+      if (er2.status !== 'ok') setTimeout(ensureEnrolled, 10_000);
+    }, 10_000);
   }
 }
