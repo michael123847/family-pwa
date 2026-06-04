@@ -22,11 +22,14 @@ const aiModelsUrl = () => getActiveBase() + CONFIG.LOCAL_AI_MODELS_PATH;
 const CACHE_KEY     = 'pwa.ai.history';
 const MODEL_KEY     = 'pwa.ai.model';
 
-// System prompt sent at the start of every request (not stored in history).
+// No system prompt. An earlier German prompt biased the model toward German
+// replies on short/ambiguous input (e.g. "?"); with no instructions the model
+// simply mirrors whatever language the user writes. Kept as an empty-content
+// object so the request-building code is unchanged — the server drops
+// empty-content messages, so nothing is actually sent.
 const SYSTEM = {
   role:    'system',
-  content: 'Du bist ein hilfreicher Familienassistent. Antworte kurz und klar. ' +
-           'Schreibe in der Sprache, in der der Nutzer schreibt.',
+  content: '',
 };
 
 // In-memory conversation (user + assistant turns only, no system message).
