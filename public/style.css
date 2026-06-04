@@ -32,6 +32,21 @@ body {
   min-height: 100dvh;
 }
 
+/* ── iOS focus-zoom guard ──────────────────────────────────────────────
+   Mobile Safari auto-zooms the whole page when you focus a form control
+   whose font-size is < 16px, and often leaves it stuck at that scale —
+   the "text is suddenly tiny / zoomed" bug reported on newer iPhones.
+   Forcing 16px on text-entry controls stops the zoom while KEEPING
+   pinch-to-zoom available (unlike user-scalable=no, which breaks
+   accessibility). Attribute selectors (0,1,1) outrank the component
+   classes like .todo-input / .val / .hex-value (0,1,0), so this wins
+   without !important. 16px ≈ the old 0.95rem, so layout is unchanged. */
+input[type="text"], input[type="email"], input[type="password"],
+input[type="search"], input[type="number"], input[type="tel"],
+input[type="url"], input:not([type]), textarea {
+  font-size: 16px;
+}
+
 /* ── Pages ────────────────────────────────────────────────────────── */
 .page {
   display: none;
