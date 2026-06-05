@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Familien-PWA — Verbinden</title>
+  <!--
+    Onboarding bootstrap for a fresh device.
+
+    The public PWA bundle only knows the generic mDNS hostname
+    (server.local), which many phones won't resolve — a chicken-and-egg for
+    first contact. This page takes the real bases as URL parameters and writes
+    them into localStorage ('pwa.bases') so probeBase() can reach the server
+    on the LAN IP or via Tailscale without mDNS. The admin makes a QR code of:
+
+      https://michael123847.github.io/family-pwa/connect.html?lan_ip=https://192.168.1.5:8443&ts=https://server.tail2636e9.ts.net:8443
+
+    A new family member scans it once; the device then opens the app already
+    knowing how to reach home.
+  -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: Arial, sans-serif; }
+    body {
+      background: #1a1a2e; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; min-height: 100dvh; padding: 24px;
+    }
+    .card {
+      max-width: 360px; width: 100%; text-align: center;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.11);
+      border-radius: 18px; padding: 32px 24px;
+    }
+    .icon { font-size: 2.6rem; margin-bottom: 10px; }
+    h1 { font-size: 1.25rem; margin-bottom: 10px; }
+    p  { color: rgba(255,255,255,0.6); font-size: 0.92rem; line-height: 1.5; }
+    .ok    { color: #4dff88; }
+    .warn  { color: #ffb800; }
+    a.btn {
+      display: inline-block; margin-top: 18px;
+      background: #4d88ff; color: #fff; text-decoration: none;
+      border-radius: 12px; padding: 13px 22px; font-weight: 600; font-size: 0.95rem;
+    }
+    code { font-size: 0.78rem; color: rgba(255,255,255,0.5); word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon">📡</div>
+    <h1>Verbinde…</h1>
+    <p id="msg">Einen Moment.</p>
+  </div>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const lanIp  = (params.get('lan_ip') || '').trim();
+      const ts     = (params.get('ts')     || '').trim();
+      // Only accept plausible https URLs — no javascript:, no garbage.
+      const valid  = u => /^https:\/\/[A-Za-z0-9.\-]+(:\d+)?\/?$/.test(u);
+
+      const card = document.getElementById('card');
+      const msg  = document.getElementById('msg');
+      const home = './'; // back to the PWA root (connect.html sits next to index.html)
+
+      let bases = {};
+      try { bases = JSON.parse(localStorage.getItem('pwa.bases')) || {}; } catch {}
+
+      let changed = false;
+      if (valid(lanIp)) { bases.lan_ip = lanIp.replace(/\/$/, ''); changed = true; }
+      if (valid(ts))    { bases.ts     = ts.replace(/\/$/, '');    changed = true; }
+
+      if (changed) {
+        try {
+          localStorage.setItem('pwa.bases', JSON.stringify(bases));
+          localStorage.removeItem('pwa.activeBase'); // force a fresh probe race
+        } catch (e) {
+          card.querySelector('.icon').textContent = '⚠️';
+          card.querySelector('h1').textContent = 'Speicher blockiert';
+          msg.innerHTML = 'Der Browser erlaubt keinen lokalen Speicher (Privater Modus?). ' +
+                          'Bitte in einem normalen Tab erneut scannen.';
+          msg.className = 'warn';
+          return;
+        }
+        card.querySelector('.icon').textContent = '✅';
+        card.querySelector('h1').textContent = 'Verbunden!';
+        msg.innerHTML = 'Dieses Gerät kennt jetzt den Familien-Server.<br>Die App öffnet automatisch …';
+        msg.className = 'ok';
+        setTimeout(() => { location.href = home; }, 1600);
+      } else {
+        card.querySelector('.icon').textContent = 'ℹ️';
+        card.querySelector('h1').textContent = 'Direkt zur App';
+        msg.innerHTML = 'Kein gültiger Verbindungs-Code in der Adresse. ' +
+                        'Du kannst die App trotzdem öffnen — sie versucht, den Server selbst zu finden.';
+        const a = document.createElement('a');
+        a.className = 'btn'; a.href = home; a.textContent = 'App öffnen';
+        card.appendChild(a);
+      }
+    })();
+  </script>
+</body>
+</html>
