@@ -185,8 +185,13 @@ async function downloadFile(meta) {
     const a    = document.createElement('a');
     a.href = url;
     a.download = meta.name;
+    // The anchor MUST be in the DOM for click() to trigger a download in
+    // Safari/Firefox (Chrome tolerates a detached node). Revoke is deferred so
+    // it doesn't cancel the download that the browser starts asynchronously.
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch {
     setStatus('Download fehlgeschlagen.', true);
   }
