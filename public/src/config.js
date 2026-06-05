@@ -24,7 +24,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v1.0.49',
+  APP_VERSION: 'v1.0.50',
 
   // ── Local server — only the generic mDNS hostname is public ────────
   // LAN_BASE  — mDNS hostname, works on the home Wi-Fi on devices that
