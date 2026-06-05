@@ -35,6 +35,8 @@ const SYSTEM = {
 // In-memory conversation (user + assistant turns only, no system message).
 let history       = [];
 let thinking      = false; // true while waiting for the first token
+let generating    = false; // true for the whole send() lifecycle (drives the Stop button)
+let currentJobId  = null;  // the server job currently streaming (for cancel)
 let selectedModel = localStorage.getItem(MODEL_KEY) ?? ''; // chosen Ollama model
 let lastError     = ''; // transient — shown until next successful response or user action
 
@@ -61,9 +63,47 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Converts plain text to safe HTML — preserves newlines and code blocks. */
+// Renders the Markdown an LLM emits as safe HTML. esc() runs first, so every
+// rule below operates on escaped text - no injection is possible. Handles
+// fenced + inline code, bold, italic, headings, and bullet/numbered lists;
+// any other text keeps its line breaks.
 function fmt(s) {
-  return esc(s).replace(/\n/g, '<br>');
+  let h = esc(s);
+
+  // Protect code from the inline rules by stashing it behind placeholders.
+  const stash = [];
+  const keep  = html => '<!--c' + (stash.push(html) - 1) + '-->';
+  h = h.replace(/```(?:[a-z0-9]*\n)?([\s\S]*?)```/gi, (_, c) => keep('<pre class="ai-code">' + c.replace(/\n$/, '') + '</pre>'));
+  h = h.replace(/`([^`\n]+)`/g, (_, c) => keep('<code>' + c + '</code>'));
+
+  // Bold before italic so ** isn't consumed by the single-* rule.
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/__([^_\n]+)__/g,     '<strong>$1</strong>');
+  h = h.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  h = h.replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>');
+
+  // Line-based: headings + bullet/numbered lists, otherwise join with <br>.
+  let out = '', list = null;
+  const closeList = () => { if (list) { out += `</${list}>`; list = null; } };
+  for (const line of h.split('\n')) {
+    let m;
+    if ((m = line.match(/^\s*[-*]\s+(.*)$/))) {
+      if (list !== 'ul') { closeList(); out += '<ul>'; list = 'ul'; }
+      out += '<li>' + m[1] + '</li>';
+    } else if ((m = line.match(/^\s*\d+\.\s+(.*)$/))) {
+      if (list !== 'ol') { closeList(); out += '<ol>'; list = 'ol'; }
+      out += '<li>' + m[1] + '</li>';
+    } else if ((m = line.match(/^\s*#{1,3}\s+(.*)$/))) {
+      closeList(); out += '<strong class="ai-h">' + m[1] + '</strong><br>';
+    } else {
+      closeList(); out += line + '<br>';
+    }
+  }
+  closeList();
+  out = out.replace(/(<br>)+$/, '');
+
+  // Restore the stashed code (which must not get <br>-wrapped internally).
+  return out.replace(/<!--c(\d+)-->/g, (_, i) => stash[+i]);
 }
 
 /**
@@ -217,6 +257,16 @@ function render() {
   });
 
   list.scrollTop = list.scrollHeight;
+  syncSendButton();
+}
+
+// Reflects the generating state on the send button: a Stop square while a
+// response streams, the send arrow otherwise.
+function syncSendButton() {
+  const btn = document.getElementById('ai-send');
+  if (!btn) return;
+  if (generating) { btn.textContent = '■'; btn.title = 'Stopp';  btn.classList.add('ai-stop'); }
+  else            { btn.textContent = '→'; btn.title = 'Senden'; btn.classList.remove('ai-stop'); }
 }
 
 function setOffline(offline) {
@@ -289,7 +339,7 @@ function onModelChange(newModel) {
 
 async function send(text) {
   text = text.trim();
-  if (!text || thinking) return;
+  if (!text || generating) return;
 
   if (!(await isLocalAvailable())) { setOffline(true); return; }
   setOffline(false);
@@ -302,7 +352,8 @@ async function send(text) {
   const mySend = ++sendGen;
 
   history.push({ role: 'user', content: text });
-  thinking = true;
+  thinking   = true;
+  generating = true;
   render();
 
   // Hold a screen Wake Lock while the model is generating — large models like
@@ -336,6 +387,7 @@ async function send(text) {
       throw new Error(err.error ?? 'HTTP ' + r.status);
     }
     const { jobId } = await r.json();
+    currentJobId = jobId;
 
     // If user cleared / switched between POST and now, abandon this send.
     if (mySend !== sendGen) return;
@@ -404,12 +456,32 @@ async function send(text) {
       lastError = msg;
     }
   } finally {
+    generating   = false;
+    currentJobId = null;
     // Always release the wake lock so the screen can sleep normally afterwards.
     try { await wakeLock?.release(); } catch {}
   }
 
   render();
   saveHistory();
+}
+
+// Stop an in-progress generation: ask the server to abort the Ollama job, bail
+// the poll loop (keeping whatever streamed so far), and reset the UI.
+function stopGeneration() {
+  if (!generating) return;
+  if (currentJobId) {
+    fetch(aiUrl() + '/' + currentJobId, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
+  }
+  sendGen++;            // makes the poll loop in send() bail out
+  generating   = false;
+  thinking     = false;
+  currentJobId = null;
+  // Drop an empty assistant placeholder if nothing had streamed yet.
+  const last = history[history.length - 1];
+  if (last && last.role === 'assistant' && !last.content) history.pop();
+  saveHistory();
+  render();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -420,6 +492,7 @@ export function initAi() {
   const input = document.getElementById('ai-input');
 
   document.getElementById('ai-send').addEventListener('click', () => {
+    if (generating) { stopGeneration(); return; }
     const t = input.value; input.value = ''; send(t);
   });
   // Enter submits — without this, mobile keyboards do nothing on Enter
