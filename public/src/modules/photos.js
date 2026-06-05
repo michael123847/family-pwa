@@ -398,8 +398,12 @@ async function downloadPhoto(meta) {
     const a    = document.createElement('a');
     a.href = url;
     a.download = storedName(meta);
+    // Must be in the DOM for Safari/Firefox; defer revoke so it doesn't cancel
+    // the download the browser starts asynchronously.
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch {
     setStatus('Download fehlgeschlagen — Server nicht erreichbar.', true);
   }
