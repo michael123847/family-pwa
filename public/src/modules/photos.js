@@ -314,16 +314,18 @@ function renderGrid(photos) {
     dl.className = 'photo-dl';
     dl.textContent = '↓';
     dl.title = 'Herunterladen';
-    dl.addEventListener('click', () => downloadPhoto(meta));
+    dl.addEventListener('click', e => { e.stopPropagation(); downloadPhoto(meta); });
 
     const del = document.createElement('button');
     del.className = 'photo-del';
     del.textContent = '✕';
     del.title = 'Löschen';
-    del.addEventListener('click', () => deletePhoto(meta));
+    del.addEventListener('click', e => { e.stopPropagation(); deletePhoto(meta); });
 
     bar.append(dl, del);
     tile.appendChild(bar);
+    // Tap the tile (not the buttons) to open the fullscreen viewer.
+    tile.addEventListener('click', () => openLightbox(meta));
     grid.appendChild(tile);
 
     // Load the thumbnail image bytes (auth-protected → fetch as blob).
@@ -334,7 +336,10 @@ function renderGrid(photos) {
 /** Fetches one photo's bytes and shows them in the given <img>. */
 async function loadThumb(meta, img) {
   try {
-    const blob = await (await api('/' + meta.id)).blob();
+    // ?thumb=1 → small server-generated JPEG for the grid. Download and any
+    // full view still fetch the original (no ?thumb). Falls back to the full
+    // image automatically if the server has no thumbnailer installed.
+    const blob = await (await api('/' + meta.id + '?thumb=1')).blob();
     const url  = URL.createObjectURL(blob);
     objectUrls.set(meta.id, url);
     img.src = url;
@@ -342,6 +347,45 @@ async function loadThumb(meta, img) {
     img.classList.add('photo-thumb-failed');
     img.alt = 'Bild konnte nicht geladen werden';
   }
+}
+
+// ── Lightbox (fullscreen viewer) ────────────────────────────────────────────
+// Tapping a tile opens the full-resolution image (no ?thumb) over the page.
+// One object URL is kept for the open image and revoked on close.
+let _lbUrl  = null;
+let _lbMeta = null;
+
+async function openLightbox(meta) {
+  const lb = document.getElementById('photo-lightbox');
+  if (!lb) return;
+  _lbMeta = meta;
+  document.getElementById('photo-lb-caption').textContent = storedName(meta);
+  const content = document.getElementById('photo-lb-content');
+  content.innerHTML = '';
+  lb.hidden = false;
+  document.body.style.overflow = 'hidden';
+  try {
+    const blob = await (await api('/' + meta.id)).blob(); // full image, not the thumb
+    if (lb.hidden) return;                                 // closed while loading
+    if (_lbUrl) URL.revokeObjectURL(_lbUrl);
+    _lbUrl = URL.createObjectURL(blob);
+    const img = document.createElement('img');
+    img.src = _lbUrl;
+    img.alt = storedName(meta);
+    content.appendChild(img);
+  } catch {
+    content.textContent = 'Bild konnte nicht geladen werden.';
+  }
+}
+
+function closeLightbox() {
+  const lb = document.getElementById('photo-lightbox');
+  if (lb) lb.hidden = true;
+  const content = document.getElementById('photo-lb-content');
+  if (content) content.innerHTML = '';
+  if (_lbUrl) { URL.revokeObjectURL(_lbUrl); _lbUrl = null; }
+  document.body.style.overflow = '';
+  _lbMeta = null;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -576,6 +620,17 @@ export function initPhotos() {
 
   // Reload when the device comes back onto the home network.
   window.addEventListener('online', () => { invalidateLocal(); load(); });
+
+  // Lightbox controls: close button, download, tap-backdrop, and Escape.
+  document.getElementById('photo-lb-close')?.addEventListener('click', closeLightbox);
+  document.getElementById('photo-lb-dl')?.addEventListener('click', () => { if (_lbMeta) downloadPhoto(_lbMeta); });
+  document.getElementById('photo-lightbox')?.addEventListener('click', e => {
+    const lb = document.getElementById('photo-lightbox');
+    if (e.target === lb || e.target === document.getElementById('photo-lb-content')) closeLightbox();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !document.getElementById('photo-lightbox')?.hidden) closeLightbox();
+  });
 
   load();
 }

@@ -292,6 +292,18 @@
     <div class="photo-empty" id="photo-empty">Noch keine Fotos — lade dein erstes hoch!</div>
   </div>
 
+  <!-- ── PHOTO LIGHTBOX (fullscreen viewer) ────────────────────────── -->
+  <div class="lightbox" id="photo-lightbox" hidden>
+    <div class="lightbox-bar">
+      <strong class="lightbox-caption" id="photo-lb-caption">—</strong>
+      <div class="lightbox-actions">
+        <button id="photo-lb-dl" type="button">Herunterladen</button>
+        <button id="photo-lb-close" type="button">Schliessen</button>
+      </div>
+    </div>
+    <div class="lightbox-content" id="photo-lb-content"></div>
+  </div>
+
   <!-- ── TAB BAR ───────────────────────────────────────────────────── -->
   <nav class="tab-bar">
     <button class="tab-btn active" data-page="home">
