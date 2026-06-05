@@ -31,7 +31,7 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v1.0.52';
+const VERSION   = 'v1.0.53';
 const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
 const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
 

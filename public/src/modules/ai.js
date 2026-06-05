@@ -20,7 +20,8 @@ import { isLocalAvailable, authHeaders, getActiveBase } from '../localBridge.js'
 const aiUrl       = () => getActiveBase() + CONFIG.LOCAL_AI_PATH;
 const aiModelsUrl = () => getActiveBase() + CONFIG.LOCAL_AI_MODELS_PATH;
 const CACHE_KEY     = 'pwa.ai.history';
-const MODEL_KEY     = 'pwa.ai.model';
+const MODEL_KEY        = 'pwa.ai.model';
+const MODELS_CACHE_KEY = 'pwa.ai.models'; // cached model-name list (survives navigation)
 
 // No system prompt. An earlier German prompt biased the model toward German
 // replies on short/ambiguous input (e.g. "?"); with no instructions the model
@@ -281,9 +282,29 @@ function setOffline(offline) {
  * localStorage if it is still installed; otherwise falls back to the
  * server's default model.
  */
+// Fills the model <option>s and keeps selectedModel valid.
+function renderModelOptions(sel, names) {
+  if (!names.includes(selectedModel)) selectedModel = names[0];
+  sel.innerHTML = names.map(n =>
+    `<option value="${esc(n)}"${n === selectedModel ? ' selected' : ''}>${esc(n)}</option>`
+  ).join('');
+  sel.disabled = false;
+}
+
 async function loadModels() {
   const sel = document.getElementById('ai-model');
   if (!sel) return;
+
+  // Restore cached models instantly so the dropdown is never blank on re-entry
+  // (it used to go empty when isLocalAvailable() returned a transient false and
+  // this function was skipped). The fetch below then refreshes the list.
+  const hasReal = !!sel.querySelector('option[value]');
+  if (!hasReal) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(MODELS_CACHE_KEY) || '[]');
+      if (cached.length) renderModelOptions(sel, cached);
+    } catch { /* no cache */ }
+  }
 
   try {
     const r = await fetch(aiModelsUrl(), {
@@ -301,23 +322,23 @@ async function loadModels() {
       return;
     }
 
-    // Smallest first — small models are usually the fastest to load and the
-    // most common default choice.
+    // Smallest first — usually the fastest to load and the common default.
     const sorted = [...models].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
     const names  = sorted.map(m => m.name);
+    localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(names));
     const stored = localStorage.getItem(MODEL_KEY);
     selectedModel = names.includes(stored) ? stored
                   : names.includes(defaultModel) ? defaultModel
                   : names[0];
     localStorage.setItem(MODEL_KEY, selectedModel);
-
-    sel.innerHTML = names.map(n =>
-      `<option value="${esc(n)}"${n === selectedModel ? ' selected' : ''}>${esc(n)}</option>`
-    ).join('');
-    sel.disabled = false;
+    renderModelOptions(sel, names);
   } catch {
-    sel.innerHTML = '<option>Modelle nicht geladen</option>';
-    sel.disabled = true;
+    // Offline / transient failure: keep the options we already show (cached or
+    // live). Only fall back to an error label if the dropdown is truly empty.
+    if (!sel.querySelector('option[value]')) {
+      sel.innerHTML = '<option>Modelle nicht geladen</option>';
+      sel.disabled = true;
+    }
   }
 }
 
@@ -526,7 +547,7 @@ export function initAi() {
     if (e.detail !== 'ai') return;
     const online = await isLocalAvailable();
     setOffline(!online);
-    if (online) await loadModels();
+    await loadModels(); // always — it restores from cache + handles offline itself
     render();
     if (online) input.focus();
   });
