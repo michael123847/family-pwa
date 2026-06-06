@@ -158,13 +158,19 @@ function renderList(items) {
     dl.title = 'Herunterladen';
     dl.addEventListener('click', () => downloadFile(meta));
 
+    const pr = document.createElement('button');
+    pr.className = 'photo-print';
+    pr.textContent = '🖨';
+    pr.title = 'Drucken';
+    pr.addEventListener('click', () => printFile(meta));
+
     const del = document.createElement('button');
     del.className = 'photo-del';
     del.textContent = '✕';
     del.title = 'Löschen';
     del.addEventListener('click', () => deleteFile(meta));
 
-    row.append(dl, del);
+    row.append(dl, pr, del);
     list.appendChild(row);
   }
 }
@@ -194,6 +200,23 @@ async function downloadFile(meta) {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch {
     setStatus('Download fehlgeschlagen.', true);
+  }
+}
+
+async function printFile(meta) {
+  setStatus('Drucke „' + meta.name + '" …');
+  try {
+    const r = await fetch(getActiveBase() + '/api/print', {
+      method:      'POST',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+      body:        JSON.stringify({ source: 'share', id: meta.id }),
+    });
+    if (r.ok) { setStatus('An den Drucker gesendet: ' + meta.name); return; }
+    const b = await r.json().catch(() => ({}));
+    setStatus(b.error || ('Druck fehlgeschlagen (HTTP ' + r.status + ').'), true);
+  } catch {
+    setStatus('Druck fehlgeschlagen — Server nicht erreichbar.', true);
   }
 }
 

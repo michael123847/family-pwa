@@ -861,7 +861,7 @@ input[type=range]:active::-webkit-slider-thumb {
   color: var(--text-dim);
   flex-shrink: 0;
 }
-.photo-dl, .photo-del {
+.photo-dl, .photo-del, .photo-print {
   background: rgba(255,255,255,0.07);
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -874,6 +874,8 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 .photo-dl  { color: var(--accent); }
 .photo-dl:hover  { background: rgba(77,136,255,0.18); }
+.photo-print { font-size: 0.82rem; }
+.photo-print:hover { background: rgba(77,136,255,0.18); }
 .photo-del { color: rgba(255,255,255,0.4); }
 .photo-del:hover { background: rgba(255,80,80,0.15); color: #ff6b6b; }
 .photo-empty {

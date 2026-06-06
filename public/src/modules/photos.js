@@ -378,6 +378,23 @@ async function openLightbox(meta) {
   }
 }
 
+async function printPhoto(meta) {
+  setStatus('Drucke Foto …');
+  try {
+    const r = await fetch(getActiveBase() + '/api/print', {
+      method:      'POST',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+      body:        JSON.stringify({ source: 'photo', id: meta.id }),
+    });
+    if (r.ok) { setStatus('An den Drucker gesendet.'); return; }
+    const b = await r.json().catch(() => ({}));
+    setStatus(b.error || ('Druck fehlgeschlagen (HTTP ' + r.status + ').'), true);
+  } catch {
+    setStatus('Druck fehlgeschlagen — Server nicht erreichbar.', true);
+  }
+}
+
 function closeLightbox() {
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
@@ -628,6 +645,7 @@ export function initPhotos() {
   // Lightbox controls: close button, download, tap-backdrop, and Escape.
   document.getElementById('photo-lb-close')?.addEventListener('click', closeLightbox);
   document.getElementById('photo-lb-dl')?.addEventListener('click', () => { if (_lbMeta) downloadPhoto(_lbMeta); });
+  document.getElementById('photo-lb-print')?.addEventListener('click', () => { if (_lbMeta) printPhoto(_lbMeta); });
   document.getElementById('photo-lightbox')?.addEventListener('click', e => {
     const lb = document.getElementById('photo-lightbox');
     if (e.target === lb || e.target === document.getElementById('photo-lb-content')) closeLightbox();
