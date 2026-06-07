@@ -379,7 +379,11 @@ async function openLightbox(meta) {
 }
 
 async function printPhoto(meta) {
-  setStatus('Drucke Foto …');
+  // Feedback must show INSIDE the lightbox — the page's #photo-status is hidden
+  // behind the fullscreen overlay. Use the button label + caption for messages.
+  const btn = document.getElementById('photo-lb-print');
+  const cap = document.getElementById('photo-lb-caption');
+  if (btn) { btn.disabled = true; btn.textContent = 'Drucke…'; }
   try {
     const r = await fetch(getActiveBase() + '/api/print', {
       method:      'POST',
@@ -387,11 +391,21 @@ async function printPhoto(meta) {
       headers:     { 'Content-Type': 'application/json', ...authHeaders() },
       body:        JSON.stringify({ source: 'photo', id: meta.id }),
     });
-    if (r.ok) { setStatus('An den Drucker gesendet.'); return; }
-    const b = await r.json().catch(() => ({}));
-    setStatus(b.error || ('Druck fehlgeschlagen (HTTP ' + r.status + ').'), true);
+    if (r.ok) {
+      if (btn) btn.textContent = '✓ Gesendet';
+    } else {
+      const b = await r.json().catch(() => ({}));
+      if (cap) cap.textContent = b.error || ('Druck fehlgeschlagen (HTTP ' + r.status + ')');
+      if (btn) btn.textContent = 'Drucken';
+    }
   } catch {
-    setStatus('Druck fehlgeschlagen — Server nicht erreichbar.', true);
+    if (cap) cap.textContent = 'Druck fehlgeschlagen — Server nicht erreichbar.';
+    if (btn) btn.textContent = 'Drucken';
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      setTimeout(() => { if (btn.textContent === '✓ Gesendet') btn.textContent = 'Drucken'; }, 2500);
+    }
   }
 }
 
