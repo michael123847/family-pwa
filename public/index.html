@@ -44,7 +44,7 @@
     <p class="section-label">TODO-Liste</p>
     <div class="todo-add">
       <input type="text" class="todo-input" id="todo-input"
-             placeholder="Neuer Eintrag…" autocomplete="off">
+             placeholder="Neuer Eintrag…" autocomplete="off" aria-label="Neuer Eintrag">
       <button class="add-btn" id="add-btn" aria-label="Hinzufügen">+</button>
     </div>
     <div class="us-bar" id="todo-us-bar">
@@ -124,34 +124,34 @@
       <h1>Color Picker</h1>
       <div class="hex-display">
         <input class="hex-value" id="hex-out" value="#8000C8"
-               maxlength="7" spellcheck="false" autocomplete="off" autocorrect="off">
+               maxlength="7" spellcheck="false" autocomplete="off" autocorrect="off" aria-label="Hex-Farbwert">
       </div>
       <div class="rgb-values">
         <div class="rgb-badge">
           <span class="label">R</span>
-          <input class="val" id="rv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="128" autocomplete="off">
+          <input class="val" id="rv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="128" autocomplete="off" aria-label="Rot 0–255">
         </div>
         <div class="rgb-badge">
           <span class="label">G</span>
-          <input class="val" id="gv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="0" autocomplete="off">
+          <input class="val" id="gv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="0" autocomplete="off" aria-label="Grün 0–255">
         </div>
         <div class="rgb-badge">
           <span class="label">B</span>
-          <input class="val" id="bv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="200" autocomplete="off">
+          <input class="val" id="bv" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="200" autocomplete="off" aria-label="Blau 0–255">
         </div>
       </div>
       <div class="slider-group">
         <div class="slider-row red">
           <span class="slider-label">Rot</span>
-          <input type="range" id="r" min="0" max="255" value="128">
+          <input type="range" id="r" min="0" max="255" value="128" aria-label="Rot-Regler">
         </div>
         <div class="slider-row green">
           <span class="slider-label">Grün</span>
-          <input type="range" id="g" min="0" max="255" value="0">
+          <input type="range" id="g" min="0" max="255" value="0" aria-label="Grün-Regler">
         </div>
         <div class="slider-row blue">
           <span class="slider-label">Blau</span>
-          <input type="range" id="b" min="0" max="255" value="200">
+          <input type="range" id="b" min="0" max="255" value="200" aria-label="Blau-Regler">
         </div>
       </div>
       <div class="harmony-selector" id="harmony-selector">
@@ -184,7 +184,7 @@
     <div class="ai-input-row">
       <input type="text" class="todo-input" id="ai-input"
              placeholder="Frage stellen…" maxlength="2000"
-             autocomplete="off" autocorrect="off">
+             autocomplete="off" autocorrect="off" aria-label="Frage stellen…">
       <button class="add-btn" id="ai-send" aria-label="Senden">→</button>
     </div>
     <button class="ai-clear-btn" id="ai-clear">Gespräch löschen</button>
@@ -206,7 +206,7 @@
     </div>
     <div class="photo-actions">
       <button class="photo-upload-btn" id="share-upload-btn">+ Datei hochladen (max. 10 MB)</button>
-      <input type="file" id="share-input" multiple hidden accept="*/*">
+      <input type="file" id="share-input" multiple hidden accept="*/*" aria-label="Datei auswählen">
     </div>
     <div class="offline-banner" id="share-offline-banner">
       📵 Nicht im Heim-WLAN — Ablage nicht verfügbar
@@ -237,7 +237,7 @@
       <p class="section-label">Name wählen</p>
       <p class="chat-setup-hint">Wie sollen dich die anderen im Hauschat sehen?</p>
       <input type="text" class="todo-input" id="chat-name-input"
-             placeholder="Dein Name…" maxlength="24" autocomplete="off">
+             placeholder="Dein Name…" maxlength="24" autocomplete="off" aria-label="Dein Name">
       <button class="photo-upload-btn" id="chat-name-save">Speichern</button>
     </div>
 
@@ -259,7 +259,7 @@
       </div>
       <div class="chat-input-row">
         <input type="text" class="todo-input" id="chat-input"
-               placeholder="Nachricht…" maxlength="1000" autocomplete="off">
+               placeholder="Nachricht…" maxlength="1000" autocomplete="off" aria-label="Nachricht">
         <button class="add-btn" id="chat-send" aria-label="Senden">→</button>
       </div>
     </div>
@@ -281,7 +281,7 @@
     <div class="photo-actions">
       <button class="photo-upload-btn" id="photo-upload-btn">+ Foto hochladen</button>
       <input type="file" id="photo-input"
-             accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+             accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden aria-label="Foto auswählen">
     </div>
     <div class="offline-banner" id="photo-offline-banner">
       📵 Nicht im Heim-WLAN — Galerie nicht verfügbar
