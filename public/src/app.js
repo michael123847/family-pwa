@@ -21,6 +21,7 @@ import { initInfo }            from './modules/info.js';
 import { initAudiotest }       from './modules/audiotest.js';
 import { initAi }             from './modules/ai.js';
 import { initShare }          from './modules/share.js';
+import { initAdminBoard }     from './modules/adminboard.js';
 import { loadSiteConfig, getSiteConfig } from './siteConfig.js';
 import { isLocalAvailable }    from './localBridge.js';
 import { hasRole }             from './auth.js';
@@ -77,6 +78,7 @@ export async function boot() {
   initAudiotest();
   initAi();
   initShare();
+  initAdminBoard();
 
   // Show initial server status, then refresh every 30 s (matches health-check TTL).
   updateLocalStatus();
@@ -117,7 +119,7 @@ async function updateLocalStatus() {
 // Subpages are opened from a menu rather than the tab bar (the colour picker
 // and Hauschat, from the "Diverses" menu). The value is the tab that stays
 // highlighted while the subpage is open.
-const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', ai: 'diverses', share: 'diverses', info: 'diverses' };
+const SUBPAGE_OWNER = { color: 'diverses', hauschat: 'diverses', ai: 'diverses', share: 'diverses', info: 'diverses', adminboard: 'diverses' };
 
 /**
  * Sets up the bottom tab bar and the subpage navigation.
