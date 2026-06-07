@@ -84,6 +84,11 @@
         <span class="menu-label">Share</span>
         <span class="menu-chevron">›</span>
       </button>
+      <button class="menu-item" data-subpage="adminboard" data-min-role="Admin">
+        <span class="menu-icon">📌</span>
+        <span class="menu-label">Admin-Notizen</span>
+        <span class="menu-chevron">›</span>
+      </button>
       <button class="menu-item" data-subpage="info">
         <span class="menu-icon">ℹ️</span>
         <span class="menu-label">Info</span>
@@ -188,6 +193,26 @@
       <button class="add-btn" id="ai-send" aria-label="Senden">→</button>
     </div>
     <button class="ai-clear-btn" id="ai-clear">Gespräch löschen</button>
+  </div>
+
+  <!-- ── ADMIN-NOTIZEN (Unterseite von Diverses) ──────────────────── -->
+  <div id="page-adminboard" class="page">
+    <button class="subpage-back" data-back="diverses">‹ Diverses</button>
+    <p class="section-label">Admin-Notizen</p>
+
+    <div class="offline-banner" id="adminboard-offline">
+      📵 Server nicht erreichbar — Admin-Notizen nicht verfügbar
+    </div>
+
+    <div class="ai-messages" id="adminboard-messages"></div>
+
+    <div class="ai-input-row">
+      <input type="text" class="todo-input" id="adminboard-input"
+             placeholder="Notiz…" maxlength="2000"
+             autocomplete="off" autocorrect="off" aria-label="Notiz eingeben">
+      <button class="add-btn" id="adminboard-send" aria-label="Senden">→</button>
+    </div>
+    <button class="ai-clear-btn" id="adminboard-clear">Löschen</button>
   </div>
 
   <!-- ── SHARE (Unterseite von Diverses) — Allzweck-Dateiablage ────── -->

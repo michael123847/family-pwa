@@ -24,7 +24,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v1.0.56',
+  APP_VERSION: 'v1.0.57',
 
   // ── Local server — only the generic mDNS hostname is public ────────
   // LAN_BASE  — mDNS hostname, works on the home Wi-Fi on devices that
@@ -47,6 +47,7 @@ export const CONFIG = {
   LOCAL_BG_PATH:     '/assets/family-bg.jpg', // family photo served by the local server
   LOCAL_AI_PATH:     '/api/ai/chat',  // streaming AI chat proxy → Ollama
   LOCAL_AI_MODELS_PATH: '/api/ai/models', // list of installed Ollama models
+  LOCAL_ADMIN_BOARD_PATH: '/api/admin/board', // Admin-only notes board
   HEALTH_TIMEOUT_MS: 1500,            // abort the health check after 1.5 s to avoid long waits
 
   // ── Weather — open-meteo.com ───────────────────────────────────────
