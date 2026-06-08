@@ -206,6 +206,11 @@
 
     <div class="ai-messages" id="adminboard-messages"></div>
 
+    <div class="us-bar" id="adminboard-us-bar" hidden>
+      <button class="us-btn" id="adminboard-us-toggle">📡 Ultraschall</button>
+      <button class="us-btn us-freq" id="adminboard-us-freq" hidden>Modus: Ultraschall</button>
+      <span class="us-status" id="adminboard-us-status"></span>
+    </div>
     <div class="ai-input-row">
       <input type="text" class="todo-input" id="adminboard-input"
              placeholder="Notiz…" maxlength="2000"
@@ -322,6 +327,9 @@
     <div class="lightbox-bar">
       <strong class="lightbox-caption" id="photo-lb-caption">—</strong>
       <div class="lightbox-actions">
+        <button id="photo-lb-like" type="button" class="photo-like" aria-label="Like">
+          <span class="heart">♥</span><span class="like-count zero">0</span>
+        </button>
         <button id="photo-lb-print" type="button">Drucken</button>
         <button id="photo-lb-dl" type="button">Herunterladen</button>
         <button id="photo-lb-close" type="button">Schliessen</button>

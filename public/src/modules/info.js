@@ -51,7 +51,7 @@ function platformLabel() {
 /** The version embedded in the Service Worker's shell cache (e.g. "v14"). */
 async function swCacheVersion() {
   try {
-    const shell = (await caches.keys()).find(k => k.startsWith('shell-'));
+    const shell = (await caches.keys()).find(k => k.startsWith('fpwa-shell-'));
     return shell ? shell.replace('shell-', '') : '—';
   } catch {
     return '—';

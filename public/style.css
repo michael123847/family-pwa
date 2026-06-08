@@ -832,7 +832,22 @@ input[type=range]:active::-webkit-slider-thumb {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
+.photo-like {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(0,0,0,0.5); border: none; border-radius: 14px;
+  padding: 4px 9px; color: #fff; font-size: 0.78rem; cursor: pointer;
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  transition: transform 0.1s;
+}
+.photo-like:active { transform: scale(0.9); }
+.photo-like .heart { font-size: 0.95rem; line-height: 1; color: rgba(255,255,255,0.85); }
+.photo-like.liked .heart { color: #ff4d6d; }
+.photo-like .like-count { font-variant-numeric: tabular-nums; }
+.photo-like .like-count.zero { display: none; }
+.lightbox-actions .photo-like { position: static; }
 .photo-thumb {
   width: 100%;
   aspect-ratio: 1;
