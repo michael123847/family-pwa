@@ -22,6 +22,7 @@ const aiModelsUrl = () => getActiveBase() + CONFIG.LOCAL_AI_MODELS_PATH;
 const CACHE_KEY     = 'pwa.ai.history';
 const MODEL_KEY        = 'pwa.ai.model';
 const MODELS_CACHE_KEY = 'pwa.ai.models'; // cached model-name list (survives navigation)
+const PENDING_JOB_KEY  = 'pwa.ai.pending'; // { jobId, model, ts } — survives app reload
 
 // No system prompt. An earlier German prompt biased the model toward German
 // replies on short/ambiguous input (e.g. "?"); with no instructions the model
@@ -45,7 +46,8 @@ let lastError     = ''; // transient — shown until next successful response or
 // counter advances mid-stream (because the user hit "Gespräch löschen" or
 // switched models), the in-flight send() exits silently and stops mutating
 // history. Without this, "clear" was ignored while AI was generating.
-let sendGen = 0;
+let sendGen  = 0;
+let wakeLock = null; // screen Wake Lock; module-scope so visibility handler can re-acquire
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -55,6 +57,13 @@ function saveHistory() {
 
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '[]'); } catch { return []; }
+}
+
+function savePendingJob(jobId, model) {
+  try { localStorage.setItem(PENDING_JOB_KEY, JSON.stringify({ jobId, model, ts: Date.now() })); } catch {}
+}
+function clearPendingJob() {
+  try { localStorage.removeItem(PENDING_JOB_KEY); } catch {}
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -345,13 +354,13 @@ async function loadModels() {
 /** Switching the model clears the conversation to avoid mixing styles. */
 function onModelChange(newModel) {
   if (!newModel || newModel === selectedModel) return;
+  if (generating) abortCurrentJob(); // free Ollama's slot immediately
   selectedModel = newModel;
   localStorage.setItem(MODEL_KEY, newModel);
-  // Same invalidation as the explicit Gespräch-löschen path.
-  sendGen++;
-  thinking  = false;
-  history   = [];
-  lastError = '';
+  generating = false;
+  thinking   = false;
+  history    = [];
+  lastError  = '';
   saveHistory();
   render();
 }
@@ -373,6 +382,7 @@ async function send(text) {
   const mySend = ++sendGen;
 
   history.push({ role: 'user', content: text });
+  saveHistory(); // persist question before generation so a reload can restore it
   thinking   = true;
   generating = true;
   render();
@@ -381,7 +391,6 @@ async function send(text) {
   // qwq:32b take 15-30 s for the first token, easily long enough for auto-lock
   // to drop the connection. Wake Lock prevents the timeout-based screen sleep;
   // a manual power-button press still wins, but auto-lock is the common case.
-  let wakeLock = null;
   try {
     if ('wakeLock' in navigator && document.visibilityState === 'visible') {
       wakeLock = await navigator.wakeLock.request('screen');
@@ -409,6 +418,7 @@ async function send(text) {
     }
     const { jobId } = await r.json();
     currentJobId = jobId;
+    savePendingJob(jobId, selectedModel);
 
     // If user cleared / switched between POST and now, abandon this send.
     if (mySend !== sendGen) return;
@@ -417,6 +427,7 @@ async function send(text) {
     //    polling will fill in.
     thinking = false;
     history.push(aiMsg);
+    saveHistory(); // persist placeholder so resumePendingJob has something to fill
     render();
 
     // 3. Poll for deltas. The `setTimeout` between polls gets paused while
@@ -424,8 +435,9 @@ async function send(text) {
     //    next poll fetches everything the server has accumulated meanwhile.
     let cursor       = 0;
     let pollErrors   = 0;
+    let pollErrDelay = 500;
     const POLL_MS    = 500;
-    const MAX_ERRORS = 8; // ~4s of consecutive failures before giving up
+    const MAX_ERRORS = 30; // ~tens of seconds of tolerance on mobile wake
 
     for (;;) {
       await new Promise(r => setTimeout(r, POLL_MS));
@@ -441,12 +453,15 @@ async function send(text) {
         });
       } catch (e) {
         pollErrors++;
+        pollErrDelay = Math.min(pollErrDelay * 1.5, 10_000);
         if (pollErrors >= MAX_ERRORS) throw e;
-        continue; // transient — try again
+        await new Promise(r => setTimeout(r, pollErrDelay));
+        continue; // transient — try again after backoff
       }
       if (!pollR.ok) throw new Error('HTTP ' + pollR.status);
       const body = await pollR.json();
-      pollErrors = 0;
+      pollErrors   = 0;
+      pollErrDelay = POLL_MS;
       if (mySend !== sendGen) return;  // re-check after the await
       if (body.delta) {
         aiMsg.content += body.delta;
@@ -479,30 +494,137 @@ async function send(text) {
   } finally {
     generating   = false;
     currentJobId = null;
+    clearPendingJob();
     // Always release the wake lock so the screen can sleep normally afterwards.
     try { await wakeLock?.release(); } catch {}
+    wakeLock = null;
   }
 
   render();
   saveHistory();
 }
 
-// Stop an in-progress generation: ask the server to abort the Ollama job, bail
-// the poll loop (keeping whatever streamed so far), and reset the UI.
-function stopGeneration() {
-  if (!generating) return;
+// Cancel the current server job: send DELETE so Ollama frees its slot immediately,
+// advance sendGen so any active poll loop bails, and clear the pending-job marker.
+// Called by stopGeneration(), the clear handler, and model-switch.
+function abortCurrentJob() {
   if (currentJobId) {
     fetch(aiUrl() + '/' + currentJobId, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
   }
-  sendGen++;            // makes the poll loop in send() bail out
-  generating   = false;
-  thinking     = false;
+  clearPendingJob();
+  sendGen++;
   currentJobId = null;
+}
+
+// Stop an in-progress generation: abort the server job, bail the poll loop
+// (keeping whatever streamed so far), and reset the UI.
+function stopGeneration() {
+  if (!generating) return;
+  abortCurrentJob();
+  generating = false;
+  thinking   = false;
   // Drop an empty assistant placeholder if nothing had streamed yet.
   const last = history[history.length - 1];
   if (last && last.role === 'assistant' && !last.content) history.pop();
   saveHistory();
   render();
+}
+
+// ── Resume ────────────────────────────────────────────────────────────────────
+
+// Re-attach to an in-flight server job after the PWA was reloaded or returned
+// from background. Reads the pending-job marker from localStorage, polls from
+// cursor 0 (replacing the placeholder content rather than appending — safe even
+// if the stored cursor was stale), and honours the same sendGen/mySend guard as
+// send(). A 404 means the server restarted and the job is gone — clears silently.
+async function resumePendingJob() {
+  if (generating) return;                        // synchronous guard — no await before this
+  let p;
+  try { p = JSON.parse(localStorage.getItem(PENDING_JOB_KEY) || 'null'); } catch {}
+  if (!p?.jobId || Date.now() - p.ts > 15 * 60_000) { clearPendingJob(); return; }
+
+  generating   = true;
+  const mySend = ++sendGen;
+  currentJobId = p.jobId;
+  lastError    = '';
+
+  // Ensure a trailing assistant placeholder exists to fill in.
+  let aiMsg = history[history.length - 1];
+  if (!aiMsg || aiMsg.role !== 'assistant') {
+    aiMsg = { role: 'assistant', content: '' };
+    history.push(aiMsg);
+  }
+  aiMsg.content = ''; // rebuilt from cursor 0
+  render();
+
+  // Re-acquire wake lock if we're in the foreground.
+  try {
+    if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch {}
+
+  let cursor       = 0;
+  let pollErrors   = 0;
+  let pollErrDelay = 500;
+  const POLL_MS    = 500;
+  const MAX_ERRORS = 30;
+
+  try {
+    for (;;) {
+      await new Promise(r => setTimeout(r, POLL_MS));
+      if (mySend !== sendGen) return;
+
+      let pollR;
+      try {
+        pollR = await fetch(aiUrl() + '/' + p.jobId + '?cursor=' + cursor, {
+          credentials: 'omit',
+          headers:     authHeaders(),
+        });
+      } catch (e) {
+        pollErrors++;
+        pollErrDelay = Math.min(pollErrDelay * 1.5, 10_000);
+        if (pollErrors >= MAX_ERRORS) throw e;
+        await new Promise(r => setTimeout(r, pollErrDelay));
+        continue;
+      }
+      if (pollR.status === 404) { clearPendingJob(); return; } // server restarted
+      if (!pollR.ok) throw new Error('HTTP ' + pollR.status);
+
+      const body = await pollR.json();
+      pollErrors   = 0;
+      pollErrDelay = POLL_MS;
+      if (mySend !== sendGen) return;
+
+      aiMsg.content += body.delta;
+      cursor = body.cursor;
+      render();
+      if (body.error) throw new Error(body.error);
+      if (body.done)  break;
+    }
+
+    if (!aiMsg.content) throw new Error('Keine Antwort erhalten.');
+
+  } catch (e) {
+    if (mySend !== sendGen) return;
+    thinking = false;
+    if (history[history.length - 1] === aiMsg && !aiMsg.content) history.pop();
+    const msg = e.message || '';
+    if (msg === 'Failed to fetch' || /aborted/i.test(msg)) {
+      lastError = 'Antwort unterbrochen — bei grossen Modellen den Bildschirm nicht sperren.';
+    } else {
+      lastError = msg;
+    }
+  } finally {
+    generating   = false;
+    currentJobId = null;
+    clearPendingJob();
+    try { await wakeLock?.release(); } catch {}
+    wakeLock = null;
+  }
+
+  render();
+  saveHistory();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -526,13 +648,12 @@ export function initAi() {
   });
 
   document.getElementById('ai-clear').addEventListener('click', () => {
-    // Invalidate any in-flight send() so its polling loop bails out without
-    // re-appending the in-progress response. Also flips thinking back off so
-    // the UI immediately reflects "no active chat".
-    sendGen++;
-    thinking  = false;
-    history   = [];
-    lastError = '';
+    // Abort any in-flight server job so Ollama frees its slot immediately.
+    if (generating) abortCurrentJob();
+    generating = false;
+    thinking   = false;
+    history    = [];
+    lastError  = '';
     saveHistory();
     render();
   });
@@ -540,6 +661,16 @@ export function initAi() {
   document.getElementById('ai-model').addEventListener('change', e => {
     if (thinking) { e.target.value = selectedModel; return; }
     onModelChange(e.target.value);
+  });
+
+  // Re-acquire the wake lock and re-attach to any pending job when the app
+  // returns to the foreground (e.g. user switched apps while waiting for qwen3).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (generating && !wakeLock) {
+      navigator.wakeLock?.request('screen').then(l => { wakeLock = l; }).catch(() => {});
+    }
+    resumePendingJob(); // no-op if generating is already true
   });
 
   // Refresh server status and model list every time the user opens this subpage.
@@ -550,6 +681,7 @@ export function initAi() {
     await loadModels(); // always — it restores from cache + handles offline itself
     render();
     if (online) input.focus();
+    resumePendingJob(); // re-attach if an answer was still being computed
   });
 
   render();
