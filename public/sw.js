@@ -31,9 +31,11 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v1.0.57';
-const APP_SHELL = 'shell-'   + VERSION; // cache name for static app files
-const RUNTIME   = 'runtime-' + VERSION; // cache name for API responses
+const VERSION   = 'v1.0.58';
+// App-specific prefix avoids cross-contamination with other PWAs on the same
+// GitHub Pages origin whose caches are visible via the shared caches API.
+const APP_SHELL = 'fpwa-shell-'   + VERSION;
+const RUNTIME   = 'fpwa-runtime-' + VERSION;
 
 // Version-independent cache owned by background.js (the family photo).
 // It must survive Service Worker updates, so it is excluded from cleanup.
@@ -98,10 +100,18 @@ self.addEventListener('install', e => {
  */
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
-    const keep = [APP_SHELL, RUNTIME, FAMILY_BG];
+    const keep = new Set([APP_SHELL, RUNTIME, FAMILY_BG]);
     const keys = await caches.keys();
+    // Only delete caches that belong to this app (own prefix, or legacy unprefixed
+    // names from before the per-app prefix was introduced). Never touch caches
+    // owned by other apps on the same origin (e.g. ss-shell-* from StockScanner).
     await Promise.all(
-      keys.filter(k => !keep.includes(k)).map(k => caches.delete(k))
+      keys.filter(k =>
+        !keep.has(k) && (
+          k.startsWith('fpwa-shell-') || k.startsWith('fpwa-runtime-') ||
+          k.startsWith('shell-')      || k.startsWith('runtime-')
+        )
+      ).map(k => caches.delete(k))
     );
     self.clients.claim();
   })());

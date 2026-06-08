@@ -305,6 +305,21 @@ function renderGrid(photos) {
     img.loading = 'lazy';
     tile.appendChild(img);
 
+    // Like overlay — top-right corner of the tile thumbnail.
+    const likeBtn = document.createElement('button');
+    likeBtn.type = 'button';
+    likeBtn.className = 'photo-like' + (meta.liked ? ' liked' : '');
+    likeBtn.setAttribute('aria-label', 'Like');
+    const heart = document.createElement('span');
+    heart.className = 'heart';
+    heart.textContent = '♥';
+    const likeCount = document.createElement('span');
+    likeCount.className = 'like-count' + ((meta.likes || 0) === 0 ? ' zero' : '');
+    likeCount.textContent = meta.likes || 0;
+    likeBtn.append(heart, likeCount);
+    likeBtn.addEventListener('click', e => { e.stopPropagation(); toggleLike(meta, likeBtn); });
+    tile.appendChild(likeBtn);
+
     const bar = document.createElement('div');
     bar.className = 'photo-bar';
     bar.innerHTML = `<span class="photo-name" title="${name}">${name}</span>
@@ -349,6 +364,48 @@ async function loadThumb(meta, img) {
   }
 }
 
+/** Optimistically toggles a like on a photo, then confirms with the server. */
+async function toggleLike(meta, btn) {
+  const willLike = !btn.classList.contains('liked');
+  btn.classList.toggle('liked', willLike);
+  const countEl = btn.querySelector('.like-count');
+  let n = Math.max(0, (parseInt(countEl.textContent, 10) || 0) + (willLike ? 1 : -1));
+  countEl.textContent = n;
+  countEl.classList.toggle('zero', n === 0);
+  meta.liked = willLike;
+  meta.likes = n;
+  // Sync the lightbox like button if this photo is open.
+  const lbBtn = document.getElementById('photo-lb-like');
+  if (lbBtn && _lbMeta?.id === meta.id) syncLightboxLike(meta, lbBtn);
+  try {
+    const r = await fetch(getActiveBase() + '/api/photos/' + meta.id + '/like', {
+      method:      'POST',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+      body:        JSON.stringify({ like: willLike }),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (typeof data.likes === 'number') {
+        meta.likes = data.likes;
+        meta.liked = data.liked;
+        countEl.textContent = data.likes;
+        countEl.classList.toggle('zero', data.likes === 0);
+        if (lbBtn && _lbMeta?.id === meta.id) syncLightboxLike(meta, lbBtn);
+      }
+    }
+  } catch { /* keep optimistic value; next load() reconciles */ }
+}
+
+/** Updates the lightbox like button to match meta's current like state. */
+function syncLightboxLike(meta, btn) {
+  btn.classList.toggle('liked', !!meta.liked);
+  const countEl = btn.querySelector('.like-count');
+  if (!countEl) return;
+  countEl.textContent = meta.likes || 0;
+  countEl.classList.toggle('zero', !meta.likes);
+}
+
 // ── Lightbox (fullscreen viewer) ────────────────────────────────────────────
 // Tapping a tile opens the full-resolution image (no ?thumb) over the page.
 // One object URL is kept for the open image and revoked on close.
@@ -360,6 +417,8 @@ async function openLightbox(meta) {
   if (!lb) return;
   _lbMeta = meta;
   document.getElementById('photo-lb-caption').textContent = storedName(meta);
+  const lbLike = document.getElementById('photo-lb-like');
+  if (lbLike) syncLightboxLike(meta, lbLike);
   const content = document.getElementById('photo-lb-content');
   content.innerHTML = '';
   lb.hidden = false;
@@ -660,6 +719,10 @@ export function initPhotos() {
   document.getElementById('photo-lb-close')?.addEventListener('click', closeLightbox);
   document.getElementById('photo-lb-dl')?.addEventListener('click', () => { if (_lbMeta) downloadPhoto(_lbMeta); });
   document.getElementById('photo-lb-print')?.addEventListener('click', () => { if (_lbMeta) printPhoto(_lbMeta); });
+  document.getElementById('photo-lb-like')?.addEventListener('click', () => {
+    const btn = document.getElementById('photo-lb-like');
+    if (_lbMeta && btn) toggleLike(_lbMeta, btn);
+  });
   document.getElementById('photo-lightbox')?.addEventListener('click', e => {
     const lb = document.getElementById('photo-lightbox');
     if (e.target === lb || e.target === document.getElementById('photo-lb-content')) closeLightbox();
