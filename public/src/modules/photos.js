@@ -279,6 +279,7 @@ function renderFolders() {
  * lazily per tile after the grid is in place.
  */
 function renderGrid(photos) {
+  _gallery = photos;
   const grid  = document.getElementById('photo-grid');
   const empty = document.getElementById('photo-empty');
 
@@ -409,23 +410,28 @@ function syncLightboxLike(meta, btn) {
 // ── Lightbox (fullscreen viewer) ────────────────────────────────────────────
 // Tapping a tile opens the full-resolution image (no ?thumb) over the page.
 // One object URL is kept for the open image and revoked on close.
-let _lbUrl  = null;
-let _lbMeta = null;
+let _lbUrl   = null;
+let _lbMeta  = null;
+let _gallery = [];  // current rendered photo list — set by renderGrid
+let _lbIndex = -1;  // index of the currently open photo within _gallery
 
-async function openLightbox(meta) {
-  const lb = document.getElementById('photo-lightbox');
-  if (!lb) return;
+function _updateNavButtons() {
+  const show = _gallery.length > 1;
+  document.getElementById('photo-lb-prev')?.toggleAttribute('hidden', !show);
+  document.getElementById('photo-lb-next')?.toggleAttribute('hidden', !show);
+}
+
+async function loadLightboxImage(meta) {
   _lbMeta = meta;
+  const lb      = document.getElementById('photo-lightbox');
+  const content = document.getElementById('photo-lb-content');
   document.getElementById('photo-lb-caption').textContent = storedName(meta);
   const lbLike = document.getElementById('photo-lb-like');
   if (lbLike) syncLightboxLike(meta, lbLike);
-  const content = document.getElementById('photo-lb-content');
   content.innerHTML = '';
-  lb.hidden = false;
-  document.body.style.overflow = 'hidden';
   try {
-    const blob = await (await api('/' + meta.id)).blob(); // full image, not the thumb
-    if (lb.hidden) return;                                 // closed while loading
+    const blob = await (await api('/' + meta.id)).blob();
+    if (lb.hidden) return;                    // closed while loading
     if (_lbUrl) URL.revokeObjectURL(_lbUrl);
     _lbUrl = URL.createObjectURL(blob);
     const img = document.createElement('img');
@@ -435,6 +441,25 @@ async function openLightbox(meta) {
   } catch {
     content.textContent = 'Bild konnte nicht geladen werden.';
   }
+}
+
+function showAt(i) {
+  if (!_gallery.length) return;
+  _lbIndex = Math.max(0, Math.min(_gallery.length - 1, i));
+  loadLightboxImage(_gallery[_lbIndex]);
+}
+function next() { showAt(_lbIndex + 1); }
+function prev() { showAt(_lbIndex - 1); }
+
+function openLightbox(meta) {
+  const lb = document.getElementById('photo-lightbox');
+  if (!lb) return;
+  const idx = _gallery.indexOf(meta);
+  _lbIndex  = idx >= 0 ? idx : 0;
+  lb.hidden = false;
+  document.body.style.overflow = 'hidden';
+  _updateNavButtons();
+  loadLightboxImage(meta);
 }
 
 async function printPhoto(meta) {
@@ -475,7 +500,8 @@ function closeLightbox() {
   if (content) content.innerHTML = '';
   if (_lbUrl) { URL.revokeObjectURL(_lbUrl); _lbUrl = null; }
   document.body.style.overflow = '';
-  _lbMeta = null;
+  _lbMeta  = null;
+  _lbIndex = -1;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -715,7 +741,7 @@ export function initPhotos() {
   // Reload when the device comes back onto the home network.
   window.addEventListener('online', () => { invalidateLocal(); load(); });
 
-  // Lightbox controls: close button, download, tap-backdrop, and Escape.
+  // Lightbox controls: close, download, tap-backdrop, nav arrows, swipe, Escape/arrow keys.
   document.getElementById('photo-lb-close')?.addEventListener('click', closeLightbox);
   document.getElementById('photo-lb-dl')?.addEventListener('click', () => { if (_lbMeta) downloadPhoto(_lbMeta); });
   document.getElementById('photo-lb-print')?.addEventListener('click', () => { if (_lbMeta) printPhoto(_lbMeta); });
@@ -723,12 +749,31 @@ export function initPhotos() {
     const btn = document.getElementById('photo-lb-like');
     if (_lbMeta && btn) toggleLike(_lbMeta, btn);
   });
+  document.getElementById('photo-lb-prev')?.addEventListener('click', e => { e.stopPropagation(); prev(); });
+  document.getElementById('photo-lb-next')?.addEventListener('click', e => { e.stopPropagation(); next(); });
   document.getElementById('photo-lightbox')?.addEventListener('click', e => {
     const lb = document.getElementById('photo-lightbox');
     if (e.target === lb || e.target === document.getElementById('photo-lb-content')) closeLightbox();
   });
+  const lbEl = document.getElementById('photo-lightbox');
+  if (lbEl) {
+    let swipeX = 0, swipeY = 0;
+    lbEl.addEventListener('touchstart', e => {
+      if (e.target.closest('button')) return;
+      swipeX = e.touches[0].clientX; swipeY = e.touches[0].clientY;
+    }, { passive: true });
+    lbEl.addEventListener('touchend', e => {
+      if (e.target.closest('button')) return;
+      const dx = e.changedTouches[0].clientX - swipeX;
+      const dy = e.changedTouches[0].clientY - swipeY;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) dx < 0 ? next() : prev();
+    }, { passive: true });
+  }
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !document.getElementById('photo-lightbox')?.hidden) closeLightbox();
+    if (document.getElementById('photo-lightbox')?.hidden) return;
+    if (e.key === 'Escape')     closeLightbox();
+    if (e.key === 'ArrowLeft')  prev();
+    if (e.key === 'ArrowRight') next();
   });
 
   load();
