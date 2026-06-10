@@ -91,7 +91,7 @@ async function render() {
 
   box.innerHTML = [
     row('App-Version',   CONFIG.APP_VERSION,
-        CONFIG.APP_VERSION === swVer ? 'good' : 'warn'),
+        CONFIG.APP_VERSION === swVer.replace(/^fpwa-/, '') ? 'good' : 'warn'),
     row('Service Worker', waiting ? swVer + ' · Update bereit' : swVer,
         waiting ? 'warn' : undefined),
     row('Heim-Server',   server ? 'Online' : 'Offline', server ? 'good' : undefined),

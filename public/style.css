@@ -955,6 +955,32 @@ input[type=range]:active::-webkit-slider-thumb {
   border-radius: 8px;
 }
 
+/* ‹ › nav arrows overlaid on the lightbox */
+.lb-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.lb-nav-btn:hover { background: rgba(0, 0, 0, 0.7); }
+.lb-nav-btn[hidden] { display: none !important; }
+#photo-lb-prev { left: 8px; }
+#photo-lb-next { right: 8px; }
+
 /* ── Hauschat (Diverses subpage) ──────────────────────────────────── */
 #page-hauschat {
   display: none;
