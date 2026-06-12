@@ -109,11 +109,13 @@
     </div>
 
     <p class="section-label" style="margin-top:26px">Darstellung</p>
-    <div class="scale-control" id="scale-control" role="group" aria-label="App-Größe">
-      <button class="info-btn" data-scale="klein">Klein</button>
-      <button class="info-btn" data-scale="mittel">Mittel</button>
-      <button class="info-btn" data-scale="gross">Gross</button>
-    </div>
+    <select class="scale-select" id="scale-select" aria-label="App-Größe">
+      <option value="extra-klein">Extra Klein</option>
+      <option value="klein">Klein</option>
+      <option value="mittel" selected>Mittel</option>
+      <option value="gross">Gross</option>
+      <option value="extra-gross">Extra Gross</option>
+    </select>
 
     <p class="section-label" style="margin-top:26px">Audiotest</p>
     <p class="audiotest-hint">

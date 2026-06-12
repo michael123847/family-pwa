@@ -1427,18 +1427,21 @@ input[type=range]:active::-webkit-slider-thumb {
 .ai-bubble .ai-h { display: inline-block; margin-top: 4px; }
 .add-btn.ai-stop { background: #ff5d5d; }
 
-/* ── Display scale (klein / mittel / gross) ────────────────────────── */
-html[data-scale="klein"] body { zoom: 0.85; }
-html[data-scale="gross"] body { zoom: 1.15; }
+/* ── Display scale ──────────────────────────────────────────────────── */
+html[data-scale="extra-klein"] body { zoom: 0.70; }
+html[data-scale="klein"]       body { zoom: 0.85; }
+html[data-scale="gross"]       body { zoom: 1.15; }
+html[data-scale="extra-gross"] body { zoom: 1.30; }
 /* mittel / unset → 1.0 (no rule needed) */
 
-.scale-control {
-  display: flex;
-  gap: 8px;
+.scale-select {
   margin-top: 8px;
-}
-.scale-control .info-btn.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  appearance: auto;
 }

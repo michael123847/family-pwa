@@ -131,16 +131,16 @@ async function hardReload() {
  * attribute so CSS falls back to its base sizing.
  */
 function applyScale(v) {
-  if (!v || v === 'mittel') {
+  const valid = ['extra-klein', 'klein', 'mittel', 'gross', 'extra-gross'];
+  if (!v || !valid.includes(v)) v = 'mittel';
+  if (v === 'mittel') {
     delete document.documentElement.dataset.scale;
-    v = 'mittel';
   } else {
     document.documentElement.dataset.scale = v;
   }
   try { localStorage.setItem('pwa.ui.scale', v); } catch { /* storage unavailable */ }
-  document.querySelectorAll('#scale-control [data-scale]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.scale === v);
-  });
+  const sel = document.getElementById('scale-select');
+  if (sel) sel.value = v;
 }
 
 /**
@@ -150,14 +150,12 @@ function applyScale(v) {
 export function initInfo() {
   if (!document.getElementById('info-content')) return;
 
-  // Restore persisted scale on boot and mark the active button.
+  // Restore persisted scale on boot and sync the dropdown.
   const savedScale = localStorage.getItem('pwa.ui.scale') || 'mittel';
   applyScale(savedScale);
 
-  // Wire scale buttons.
-  document.querySelectorAll('#scale-control [data-scale]').forEach(btn => {
-    btn.addEventListener('click', () => applyScale(btn.dataset.scale));
-  });
+  // Wire scale dropdown.
+  document.getElementById('scale-select')?.addEventListener('change', e => applyScale(e.target.value));
 
   document.getElementById('info-refresh')?.addEventListener('click', render);
   document.getElementById('info-reload')?.addEventListener('click', hardReload);

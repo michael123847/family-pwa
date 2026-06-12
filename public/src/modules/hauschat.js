@@ -92,6 +92,15 @@ function idbPut(store, value) {
   });
 }
 
+function idbDelete(store, key) {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(store, 'readwrite');
+    t.objectStore(store).delete(key);
+    t.oncomplete = () => resolve();
+    t.onerror    = () => reject(t.error);
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Escapes HTML so message text can never inject markup into the DOM. */
@@ -480,7 +489,12 @@ export async function initHauschat() {
 
   device   = await idbGet('meta', 'device').then(d => d ? { id: d.id, name: d.name } : null);
   cursor   = await idbGet('meta', 'cursor').then(c => c?.seq ?? 0);
-  messages = await idbGetAll('messages');
+  const allMessages = await idbGetAll('messages');
+  // Prune messages older than 48 h from the local cache to match server TTL.
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const stale  = allMessages.filter(m => m.ts < cutoff);
+  await Promise.all(stale.map(m => idbDelete('messages', m.id).catch(() => {})));
+  messages = allMessages.filter(m => m.ts >= cutoff);
 
   document.getElementById('chat-send').addEventListener('click', send);
   document.getElementById('chat-input').addEventListener('keydown', e => {
