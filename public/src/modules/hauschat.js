@@ -208,6 +208,15 @@ function render() {
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 
+/** Removes messages older than 48 h from the in-memory array and IndexedDB. */
+async function pruneLocal() {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const stale  = messages.filter(m => m.ts < cutoff);
+  if (!stale.length) return;
+  await Promise.all(stale.map(m => idbDelete('messages', m.id).catch(() => {})));
+  messages = messages.filter(m => m.ts >= cutoff);
+}
+
 /**
  * Synchronises with the server: uploads pending messages, then fetches any
  * newer messages. Safe to call repeatedly; overlapping calls are ignored.
@@ -247,6 +256,7 @@ async function sync() {
     }
     if (data.messages.length) await idbPut('meta', { k: 'cursor', seq: cursor });
     if (changed) render();
+    await pruneLocal();
   } catch {
     setOffline(true);
   } finally {
@@ -416,14 +426,14 @@ function updatePushLabel(btn, subscribed) {
 }
 
 /**
- * Toggles Web Push subscription for chat messages. Hides the button entirely
- * if the browser lacks Web Push support (Safari < 16.4, etc.) so it doesn't
- * confuse users on unsupported platforms.
+ * Toggles Hauschat push notifications via the per-feature chat_notify flag.
+ * Hides the button entirely if the browser lacks Web Push support.
+ * Turning off never unsubscribes the shared PushManager subscription so
+ * AI-done notifications (ai_notify) keep working independently.
  */
 async function setupPushButton() {
   const btn = document.getElementById('chat-push-toggle');
   if (!btn) return;
-  // Feature-detect: need Notification API, SW, and PushManager.
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     btn.hidden = true;
     return;
@@ -432,47 +442,71 @@ async function setupPushButton() {
 
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
-  updatePushLabel(btn, !!sub);
+
+  let notifyOn = false;
+
+  if (sub) {
+    try {
+      const r = await fetch(getActiveBase() + '/api/push/chat-notify', {
+        credentials: 'omit', headers: authHeaders(),
+      });
+      // Migration sets chat_notify=true for existing subscribers, so default to true
+      // if the server hasn't run the migration yet (endpoint returns !ok).
+      const { enabled } = r.ok ? await r.json() : { enabled: true };
+      notifyOn = !!enabled;
+    } catch { notifyOn = true; }
+  }
+  updatePushLabel(btn, notifyOn);
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        // Unsubscribe: remove on server first, then locally.
-        await fetch(getActiveBase() + '/api/push/subscribe', {
-          method:      'DELETE',
+      if (notifyOn) {
+        // Turn off — flip flag only, keep subscription for other features.
+        const r = await fetch(getActiveBase() + '/api/push/chat-notify', {
+          method:      'POST',
           credentials: 'omit',
-          headers:     authHeaders(),
-        }).catch(() => {});
-        await existing.unsubscribe();
+          headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+          body:        JSON.stringify({ enabled: false }),
+        });
+        if (!r.ok) throw new Error('Deaktivierung fehlgeschlagen');
+        notifyOn = false;
         updatePushLabel(btn, false);
         return;
       }
-      // Subscribe: ask permission, fetch VAPID key, register with PushManager,
-      // then POST the subscription to the server.
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') { updatePushLabel(btn, false); return; }
+      // Turn on — ensure a subscription exists first.
+      let existing = await reg.pushManager.getSubscription();
+      if (!existing) {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { updatePushLabel(btn, false); return; }
 
-      const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
-        credentials: 'omit', headers: authHeaders(),
-      });
-      if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
-      const { publicKey } = await vapidR.json();
+        const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
+          credentials: 'omit', headers: authHeaders(),
+        });
+        if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
+        const { publicKey } = await vapidR.json();
 
-      const newSub = await reg.pushManager.subscribe({
-        userVisibleOnly:      true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
-      });
+        existing = await reg.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
 
-      const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
+        const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
+          method:      'POST',
+          credentials: 'omit',
+          headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+          body:        JSON.stringify({ subscription: existing.toJSON() }),
+        });
+        if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
+      }
+      const r = await fetch(getActiveBase() + '/api/push/chat-notify', {
         method:      'POST',
         credentials: 'omit',
         headers:     { 'Content-Type': 'application/json', ...authHeaders() },
-        body:        JSON.stringify({ subscription: newSub.toJSON() }),
+        body:        JSON.stringify({ enabled: true }),
       });
-      if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
-
+      if (!r.ok) throw new Error('Aktivierung fehlgeschlagen');
+      notifyOn = true;
       updatePushLabel(btn, true);
     } catch (e) {
       console.warn('[push] toggle failed:', e);
@@ -489,12 +523,8 @@ export async function initHauschat() {
 
   device   = await idbGet('meta', 'device').then(d => d ? { id: d.id, name: d.name } : null);
   cursor   = await idbGet('meta', 'cursor').then(c => c?.seq ?? 0);
-  const allMessages = await idbGetAll('messages');
-  // Prune messages older than 48 h from the local cache to match server TTL.
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const stale  = allMessages.filter(m => m.ts < cutoff);
-  await Promise.all(stale.map(m => idbDelete('messages', m.id).catch(() => {})));
-  messages = allMessages.filter(m => m.ts >= cutoff);
+  messages = await idbGetAll('messages');
+  await pruneLocal();
 
   document.getElementById('chat-send').addEventListener('click', send);
   document.getElementById('chat-input').addEventListener('keydown', e => {
