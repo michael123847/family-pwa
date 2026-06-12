@@ -57,11 +57,17 @@ export async function boot() {
       if (e.data?.type === 'open-hauschat') {
         window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'hauschat' }));
       }
+      if (e.data?.type === 'open-ai') {
+        window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'ai' }));
+      }
     });
   }
-  // Also handle direct URL navigation via "./#hauschat" (notificationclick fallback).
+  // Also handle direct URL navigation via "./#hauschat" / "./#ai" (notificationclick fallback).
   if (location.hash === '#hauschat') {
     window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'hauschat' }));
+  }
+  if (location.hash === '#ai') {
+    window.dispatchEvent(new CustomEvent('pwa:navigate', { detail: 'ai' }));
   }
 
   // Weather and departures need the location config from the local server.

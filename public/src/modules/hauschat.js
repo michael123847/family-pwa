@@ -386,7 +386,7 @@ function showChat() {
 // ── Push notifications ────────────────────────────────────────────────────────
 
 /** Converts a URL-safe base64 VAPID public key to the Uint8Array PushManager wants. */
-function urlBase64ToUint8Array(b64) {
+export function urlBase64ToUint8Array(b64) {
   const padding = '='.repeat((4 - b64.length % 4) % 4);
   const std     = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw     = atob(std);

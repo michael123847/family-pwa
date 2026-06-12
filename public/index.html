@@ -14,6 +14,7 @@
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%23462C57'/><text x='90' y='124' font-size='100' text-anchor='middle'>%F0%9F%8F%A0</text></svg>">
   <link rel="stylesheet" href="style.css">
   <title>Info App</title>
+  <script>try{var s=localStorage.getItem('pwa.ui.scale');if(s)document.documentElement.dataset.scale=s;}catch(e){}</script>
 </head>
 <body>
 
@@ -107,6 +108,13 @@
       <button class="info-btn info-btn-warn" id="info-reload">Cache leeren &amp; neu laden</button>
     </div>
 
+    <p class="section-label" style="margin-top:26px">Darstellung</p>
+    <div class="scale-control" id="scale-control" role="group" aria-label="App-Größe">
+      <button class="info-btn" data-scale="klein">Klein</button>
+      <button class="info-btn" data-scale="mittel">Mittel</button>
+      <button class="info-btn" data-scale="gross">Gross</button>
+    </div>
+
     <p class="section-label" style="margin-top:26px">Audiotest</p>
     <p class="audiotest-hint">
       Spielt ein Testsignal über den Lautsprecher ab und versucht, es mit dem
@@ -178,6 +186,7 @@
     <div class="section-label-row">
       <p class="section-label">KI-Assistent</p>
       <select id="ai-model" class="ai-model-select" aria-label="Modell wählen"></select>
+      <button class="us-btn" id="ai-push-toggle" hidden>🔔 Aktivieren</button>
     </div>
 
     <div class="offline-banner" id="ai-offline">
