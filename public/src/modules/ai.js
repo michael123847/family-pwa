@@ -15,6 +15,7 @@
 
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, authHeaders, getActiveBase } from '../localBridge.js';
+import { urlBase64ToUint8Array } from './hauschat.js';
 
 // Computed lazily — see localBridge.getActiveBase() / probeBase().
 const aiUrl       = () => getActiveBase() + CONFIG.LOCAL_AI_PATH;
@@ -627,6 +628,100 @@ async function resumePendingJob() {
   saveHistory();
 }
 
+// ── Push notifications ────────────────────────────────────────────────────────
+
+/** Updates the AI push toggle label to match current permission + enabled state. */
+function updateAiPushLabel(btn, subscribed) {
+  if (Notification.permission === 'denied') {
+    btn.textContent = '🔕 Blockiert';
+    btn.disabled    = true;
+    return;
+  }
+  btn.disabled    = false;
+  btn.textContent = subscribed ? '🔔 An' : '🔔 Aktivieren';
+}
+
+/**
+ * Wires the AI push-notification toggle button. Hides it if the browser
+ * lacks Web Push support. Mirrors setupPushButton() in hauschat.js but
+ * only toggles the per-feature ai_notify flag — never unsubscribes the
+ * shared PushManager subscription (Hauschat may still use it).
+ */
+async function setupAiPushButton() {
+  const btn = document.getElementById('ai-push-toggle');
+  if (!btn) return;
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+
+  if (sub) {
+    try {
+      const r = await fetch(getActiveBase() + '/api/push/ai-notify', {
+        credentials: 'omit', headers: authHeaders(),
+      });
+      const { enabled } = r.ok ? await r.json() : { enabled: false };
+      updateAiPushLabel(btn, !!enabled);
+    } catch { updateAiPushLabel(btn, false); }
+  } else {
+    updateAiPushLabel(btn, false);
+  }
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        // Already subscribed — just toggle the ai_notify flag off.
+        await fetch(getActiveBase() + '/api/push/ai-notify', {
+          method: 'POST', credentials: 'omit',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ enabled: false }),
+        });
+        updateAiPushLabel(btn, false);
+        return;
+      }
+      // Not subscribed yet — request permission, create subscription, then enable.
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { updateAiPushLabel(btn, false); return; }
+
+      const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
+        credentials: 'omit', headers: authHeaders(),
+      });
+      if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
+      const { publicKey } = await vapidR.json();
+
+      const newSub = await reg.pushManager.subscribe({
+        userVisibleOnly:      true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
+        method: 'POST', credentials: 'omit',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ subscription: newSub.toJSON() }),
+      });
+      if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
+
+      await fetch(getActiveBase() + '/api/push/ai-notify', {
+        method: 'POST', credentials: 'omit',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ enabled: true }),
+      });
+      updateAiPushLabel(btn, true);
+    } catch (err) {
+      console.warn('[push] ai toggle failed:', err);
+      updateAiPushLabel(btn, false);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 export function initAi() {
@@ -683,6 +778,8 @@ export function initAi() {
     if (online) input.focus();
     resumePendingJob(); // re-attach if an answer was still being computed
   });
+
+  setupAiPushButton();
 
   render();
 }

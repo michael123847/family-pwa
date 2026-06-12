@@ -31,7 +31,7 @@
 
 // Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
 // (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v1.1.1';
+const VERSION   = 'v1.2.0';
 // App-specific prefix avoids cross-contamination with other PWAs on the same
 // GitHub Pages origin whose caches are visible via the shared caches API.
 const APP_SHELL = 'fpwa-shell-'   + VERSION;
@@ -191,6 +191,24 @@ self.addEventListener('push', e => {
         data:  { url: './#hauschat' },
       })
     );
+  } else if (data.type === 'ai') {
+    e.waitUntil((async () => {
+      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      // Suppress banner if the user already has the app open and visible.
+      if (allClients.some(c => c.focused || c.visibilityState === 'visible')) {
+        // Optionally notify the open page so it can update in-place.
+        for (const c of allClients) c.postMessage({ type: 'ai-ready', jobId: data.jobId });
+        return;
+      }
+      await self.registration.showNotification(data.title || 'KI-Antwort fertig', {
+        body:     data.body || '',
+        tag:      'ai-ready',
+        renotify: true,
+        icon:     './icons/icon-192.png',
+        badge:    './icons/icon-96.png',
+        data:     { url: './#ai' },
+      });
+    })());
   }
 });
 
@@ -201,6 +219,8 @@ self.addEventListener('push', e => {
  */
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  const url     = e.notification.data?.url || './#hauschat';
+  const msgType = url.includes('#ai') ? 'open-ai' : 'open-hauschat';
   e.waitUntil((async () => {
     const allClients = await self.clients.matchAll({
       type:            'window',
@@ -210,11 +230,11 @@ self.addEventListener('notificationclick', e => {
       // Prefer focusing an existing window.
       try {
         await c.focus();
-        c.postMessage({ type: 'open-hauschat' });
+        c.postMessage({ type: msgType });
         return;
       } catch { /* fall through to openWindow */ }
     }
-    await self.clients.openWindow('./#hauschat');
+    await self.clients.openWindow(url);
   })());
 });
 
