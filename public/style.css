@@ -1438,9 +1438,9 @@ html[data-scale="extra-gross"] body { zoom: 1.30; }
   margin-top: 8px;
   width: 100%;
   padding: 10px 12px;
-  background: var(--card-bg);
+  background: var(--card);
   color: var(--text);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   font-size: 0.95rem;
   appearance: auto;

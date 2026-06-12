@@ -630,22 +630,28 @@ async function resumePendingJob() {
 
 // ── Push notifications ────────────────────────────────────────────────────────
 
-/** Updates the AI push toggle label to match current permission + enabled state. */
-function updateAiPushLabel(btn, subscribed) {
+/** Updates the AI push toggle label. Pass true/false for on/off, 'power-only' for role block. */
+function updateAiPushLabel(btn, state) {
+  if (state === 'power-only') {
+    btn.textContent = '🔕 Nur für Power';
+    btn.disabled    = true;
+    return;
+  }
   if (Notification.permission === 'denied') {
     btn.textContent = '🔕 Blockiert';
     btn.disabled    = true;
     return;
   }
   btn.disabled    = false;
-  btn.textContent = subscribed ? '🔔 An' : '🔔 Aktivieren';
+  btn.textContent = state ? '🔔 An' : '🔔 Aktivieren';
 }
 
 /**
  * Wires the AI push-notification toggle button. Hides it if the browser
- * lacks Web Push support. Mirrors setupPushButton() in hauschat.js but
- * only toggles the per-feature ai_notify flag — never unsubscribes the
- * shared PushManager subscription (Hauschat may still use it).
+ * lacks Web Push support. Only ever toggles the per-feature ai_notify flag —
+ * never unsubscribes the shared PushManager subscription (Hauschat may still
+ * use it). Uses a closure `notifyOn` variable so the click handler always
+ * knows the current state without re-fetching.
  */
 async function setupAiPushButton() {
   const btn = document.getElementById('ai-push-toggle');
@@ -659,59 +665,66 @@ async function setupAiPushButton() {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
 
+  let notifyOn = false;
+
   if (sub) {
     try {
       const r = await fetch(getActiveBase() + '/api/push/ai-notify', {
         credentials: 'omit', headers: authHeaders(),
       });
+      if (r.status === 403) { updateAiPushLabel(btn, 'power-only'); return; }
       const { enabled } = r.ok ? await r.json() : { enabled: false };
-      updateAiPushLabel(btn, !!enabled);
-    } catch { updateAiPushLabel(btn, false); }
-  } else {
-    updateAiPushLabel(btn, false);
+      notifyOn = !!enabled;
+    } catch { /* leave notifyOn = false */ }
   }
+  updateAiPushLabel(btn, notifyOn);
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        // Already subscribed — just toggle the ai_notify flag off.
-        await fetch(getActiveBase() + '/api/push/ai-notify', {
+      if (notifyOn) {
+        // Turn off — flip flag only, never touch the subscription.
+        const r = await fetch(getActiveBase() + '/api/push/ai-notify', {
           method: 'POST', credentials: 'omit',
           headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ enabled: false }),
         });
+        if (!r.ok) throw new Error('Deaktivierung fehlgeschlagen');
+        notifyOn = false;
         updateAiPushLabel(btn, false);
         return;
       }
-      // Not subscribed yet — request permission, create subscription, then enable.
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') { updateAiPushLabel(btn, false); return; }
+      // Turn on — ensure a subscription exists first.
+      let existing = await reg.pushManager.getSubscription();
+      if (!existing) {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { updateAiPushLabel(btn, false); return; }
 
-      const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
-        credentials: 'omit', headers: authHeaders(),
-      });
-      if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
-      const { publicKey } = await vapidR.json();
+        const vapidR = await fetch(getActiveBase() + '/api/push/vapid', {
+          credentials: 'omit', headers: authHeaders(),
+        });
+        if (!vapidR.ok) throw new Error('VAPID-Key nicht verfügbar');
+        const { publicKey } = await vapidR.json();
 
-      const newSub = await reg.pushManager.subscribe({
-        userVisibleOnly:      true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
-      });
+        existing = await reg.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
 
-      const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
-        method: 'POST', credentials: 'omit',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ subscription: newSub.toJSON() }),
-      });
-      if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
-
-      await fetch(getActiveBase() + '/api/push/ai-notify', {
+        const postR = await fetch(getActiveBase() + '/api/push/subscribe', {
+          method: 'POST', credentials: 'omit',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ subscription: existing.toJSON() }),
+        });
+        if (!postR.ok) throw new Error('Server-Registrierung fehlgeschlagen');
+      }
+      const r = await fetch(getActiveBase() + '/api/push/ai-notify', {
         method: 'POST', credentials: 'omit',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ enabled: true }),
       });
+      if (!r.ok) throw new Error('Aktivierung fehlgeschlagen');
+      notifyOn = true;
       updateAiPushLabel(btn, true);
     } catch (err) {
       console.warn('[push] ai toggle failed:', err);
