@@ -321,10 +321,15 @@ function renderGrid(photos) {
     likeBtn.addEventListener('click', e => { e.stopPropagation(); toggleLike(meta, likeBtn); });
     tile.appendChild(likeBtn);
 
+    const nameEl = document.createElement('div');
+    nameEl.className = 'photo-name';
+    nameEl.title = name;
+    nameEl.textContent = name;
+    tile.appendChild(nameEl);
+
     const bar = document.createElement('div');
     bar.className = 'photo-bar';
-    bar.innerHTML = `<span class="photo-name" title="${name}">${name}</span>
-                     <span class="photo-size">${fmtSize(meta.size)}</span>`;
+    bar.innerHTML = `<span class="photo-size">${fmtSize(meta.size)}</span>`;
 
     const dl = document.createElement('button');
     dl.className = 'photo-dl';
@@ -426,6 +431,8 @@ async function loadLightboxImage(meta) {
   const lb      = document.getElementById('photo-lightbox');
   const content = document.getElementById('photo-lb-content');
   document.getElementById('photo-lb-caption').textContent = storedName(meta);
+  const lbFooter = document.getElementById('photo-lb-footer');
+  if (lbFooter) lbFooter.textContent = storedName(meta);
   const lbLike = document.getElementById('photo-lb-like');
   if (lbLike) syncLightboxLike(meta, lbLike);
   content.innerHTML = '';
