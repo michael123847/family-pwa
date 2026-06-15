@@ -435,7 +435,7 @@ async function loadLightboxImage(meta) {
   if (lbFooter) lbFooter.textContent = storedName(meta);
   const lbLike = document.getElementById('photo-lb-like');
   if (lbLike) syncLightboxLike(meta, lbLike);
-  content.innerHTML = '';
+  Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
   clearCropOverlay();
   try {
     const blob = await (await api('/' + meta.id)).blob();
@@ -448,7 +448,10 @@ async function loadLightboxImage(meta) {
     img.addEventListener('load', updateCropOverlay, { once: true });
     content.appendChild(img);
   } catch {
-    content.textContent = 'Bild konnte nicht geladen werden.';
+    const err = document.createElement('div');
+    err.className = 'lb-error';
+    err.textContent = 'Bild konnte nicht geladen werden.';
+    content.appendChild(err);
   }
 }
 
@@ -591,7 +594,7 @@ function closeLightbox() {
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
   const content = document.getElementById('photo-lb-content');
-  if (content) content.innerHTML = '';
+  if (content) Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
   clearCropOverlay();
   if (_lbUrl) { URL.revokeObjectURL(_lbUrl); _lbUrl = null; }
   document.body.style.overflow = '';

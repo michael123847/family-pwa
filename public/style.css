@@ -979,6 +979,13 @@ input[type=range]:active::-webkit-slider-thumb {
   box-sizing: border-box;
 }
 
+.lb-error {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 1rem;
+}
+
 .lightbox-footer {
   width: 100%;
   padding: 10px 14px;
