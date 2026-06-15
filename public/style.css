@@ -949,6 +949,7 @@ input[type=range]:active::-webkit-slider-thumb {
   padding: 8px 0;
   color: var(--text-dim);
   font-size: 0.9rem;
+  position: relative; /* anchor for .crop-overlay */
 }
 .lightbox-content img {
   max-width: 100%;
@@ -956,16 +957,38 @@ input[type=range]:active::-webkit-slider-thumb {
   object-fit: contain;
   border-radius: 8px;
 }
+/* ── Crop-preview overlay (print-crop indicator in lightbox) ────────────────
+   The overlay sits over the lightbox-content box and veils the strips that
+   will be cut off when printing on 4x6. Positioned/sized by photos.js.
+   pointer-events:none so taps and swipes pass through unaffected.           */
+.crop-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.crop-veil {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+.crop-frame {
+  position: absolute;
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
 .lightbox-footer {
   width: 100%;
   padding: 10px 14px;
   background: rgba(0,0,0,0.6);
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
+  text-align: center;
   flex-shrink: 0;
   z-index: 101;
 }

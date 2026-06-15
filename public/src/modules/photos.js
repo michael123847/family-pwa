@@ -430,12 +430,13 @@ async function loadLightboxImage(meta) {
   _lbMeta = meta;
   const lb      = document.getElementById('photo-lightbox');
   const content = document.getElementById('photo-lb-content');
-  document.getElementById('photo-lb-caption').textContent = storedName(meta);
+  document.getElementById('photo-lb-caption').textContent = '';
   const lbFooter = document.getElementById('photo-lb-footer');
   if (lbFooter) lbFooter.textContent = storedName(meta);
   const lbLike = document.getElementById('photo-lb-like');
   if (lbLike) syncLightboxLike(meta, lbLike);
   content.innerHTML = '';
+  clearCropOverlay();
   try {
     const blob = await (await api('/' + meta.id)).blob();
     if (lb.hidden) return;                    // closed while loading
@@ -444,6 +445,7 @@ async function loadLightboxImage(meta) {
     const img = document.createElement('img');
     img.src = _lbUrl;
     img.alt = storedName(meta);
+    img.addEventListener('load', updateCropOverlay, { once: true });
     content.appendChild(img);
   } catch {
     content.textContent = 'Bild konnte nicht geladen werden.';
@@ -500,11 +502,97 @@ async function printPhoto(meta) {
   }
 }
 
+// ── Crop-preview overlay ─────────────────────────────────────────────────────
+// Veils the strips that will be cut off when printing on 4x6 photo paper.
+// Uses the same cover-crop algorithm as the server (printPhotoSized / sharp):
+//   orientation: landscape if W>H, else portrait
+//   targetAR:    portrait → 2/3 (W:H), landscape → 3/2
+//   cover-crop:  if imgAR > targetAR → cut sides; else → cut top/bottom
+// The image is displayed with object-fit:contain so we first compute the
+// rendered image rect inside the content box, then apply the crop math.
+function updateCropOverlay() {
+  const content = document.getElementById('photo-lb-content');
+  const overlay = document.getElementById('photo-lb-crop-overlay');
+  if (!content || !overlay) return;
+  const img = content.querySelector('img');
+  if (!img || !img.complete || !img.naturalWidth) {
+    // Hide overlay if no image is loaded yet
+    overlay.style.display = 'none';
+    return;
+  }
+
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const isLandscape = W > H;
+  const targetAR = isLandscape ? 3 / 2 : 2 / 3;
+  const imgAR    = W / H;
+
+  // Kept rect in natural-image pixels
+  let keptW, keptH, cropX, cropY;
+  if (imgAR > targetAR) {
+    // cut sides
+    keptW = Math.round(H * targetAR);
+    keptH = H;
+    cropX = (W - keptW) / 2;
+    cropY = 0;
+  } else {
+    // cut top/bottom
+    keptW = W;
+    keptH = Math.round(W / targetAR);
+    cropX = 0;
+    cropY = (H - keptH) / 2;
+  }
+
+  // Rendered image rect inside content box (object-fit: contain)
+  const boxW = content.clientWidth;
+  const boxH = content.clientHeight;
+  const scale = Math.min(boxW / W, boxH / H);
+  const rendW = W * scale;
+  const rendH = H * scale;
+  const offX  = (boxW - rendW) / 2;   // left gap (letterbox / pillarbox)
+  const offY  = (boxH - rendH) / 2;   // top gap
+
+  // Map kept rect into box coordinates
+  const kx = offX + cropX * scale;
+  const ky = offY + cropY * scale;
+  const kw = keptW * scale;
+  const kh = keptH * scale;
+
+  // Position the four veil bands and the frame
+  const setEl = (id, t, l, w, h) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.top    = t + 'px';
+    el.style.left   = l + 'px';
+    el.style.width  = w + 'px';
+    el.style.height = h + 'px';
+  };
+
+  // Top veil: from top of rendered image to top of kept rect
+  setEl('photo-lb-veil-top',    offY,        offX,        rendW, ky - offY);
+  // Bottom veil: from bottom of kept rect to bottom of rendered image
+  setEl('photo-lb-veil-bottom', ky + kh,     offX,        rendW, (offY + rendH) - (ky + kh));
+  // Left veil: cut sides case only (height = kh)
+  setEl('photo-lb-veil-left',   ky,          offX,        kx - offX, kh);
+  // Right veil: right side
+  setEl('photo-lb-veil-right',  ky,          kx + kw,     (offX + rendW) - (kx + kw), kh);
+  // Frame around kept area
+  setEl('photo-lb-crop-frame',  ky,          kx,          kw, kh);
+
+  overlay.style.display = '';
+}
+
+function clearCropOverlay() {
+  const overlay = document.getElementById('photo-lb-crop-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
 function closeLightbox() {
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
   const content = document.getElementById('photo-lb-content');
   if (content) content.innerHTML = '';
+  clearCropOverlay();
   if (_lbUrl) { URL.revokeObjectURL(_lbUrl); _lbUrl = null; }
   document.body.style.overflow = '';
   _lbMeta  = null;
@@ -781,6 +869,11 @@ export function initPhotos() {
     if (e.key === 'Escape')     closeLightbox();
     if (e.key === 'ArrowLeft')  prev();
     if (e.key === 'ArrowRight') next();
+  });
+
+  // Recompute crop overlay on resize (e.g. device rotate, window resize).
+  window.addEventListener('resize', () => {
+    if (!document.getElementById('photo-lightbox')?.hidden) updateCropOverlay();
   });
 
   load();
