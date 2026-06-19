@@ -419,6 +419,7 @@ let _lbUrl   = null;
 let _lbMeta  = null;
 let _gallery = [];  // current rendered photo list — set by renderGrid
 let _lbIndex = -1;  // index of the currently open photo within _gallery
+let _lbRotation = 0; // view-only rotation (0/90/180/270) — never changes the JPEG or the print
 
 function _updateNavButtons() {
   const show = _gallery.length > 1;
@@ -428,6 +429,7 @@ function _updateNavButtons() {
 
 async function loadLightboxImage(meta) {
   _lbMeta = meta;
+  _lbRotation = 0;
   const lb      = document.getElementById('photo-lightbox');
   const content = document.getElementById('photo-lb-content');
   document.getElementById('photo-lb-caption').textContent = '';
@@ -475,6 +477,7 @@ function openLightbox(meta) {
 }
 
 async function printPhoto(meta) {
+  if (!confirm('Auf dem Heimdrucker drucken?\n\nBitte Fotopapier mit Druckseite nach unten einlegen.')) return;
   // Feedback must show INSIDE the lightbox — the page's #photo-status is hidden
   // behind the fullscreen overlay. Use the button label + caption for messages.
   const btn = document.getElementById('photo-lb-print');
@@ -517,6 +520,7 @@ function updateCropOverlay() {
   const content = document.getElementById('photo-lb-content');
   const overlay = document.getElementById('photo-lb-crop-overlay');
   if (!content || !overlay) return;
+  if (_lbRotation !== 0) { overlay.style.display = 'none'; return; }
   const img = content.querySelector('img');
   if (!img || !img.complete || !img.naturalWidth) {
     // Hide overlay if no image is loaded yet
@@ -590,6 +594,36 @@ function clearCropOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
+// ── View rotation (display-only — does NOT change the JPEG or the print) ─────
+function rotateLightbox() {
+  _lbRotation = (_lbRotation + 90) % 360;
+  applyLbRotation();
+}
+
+function applyLbRotation() {
+  const content = document.getElementById('photo-lb-content');
+  const img = content?.querySelector('img');
+  if (!img) return;
+  if (_lbRotation === 0) {
+    img.style.transform = '';
+    updateCropOverlay();          // crop preview only meaningful at 0°
+    return;
+  }
+  clearCropOverlay();             // hide preview while rotated — the print is unaffected
+  if (_lbRotation === 180) {
+    img.style.transform = 'rotate(180deg)';
+    return;
+  }
+  // 90° / 270°: rotate, then scale so the rotated image still fits the box
+  const cW = content.clientWidth, cH = content.clientHeight;
+  const nW = img.naturalWidth, nH = img.naturalHeight;
+  if (!nW || !nH || !cW || !cH) { img.style.transform = `rotate(${_lbRotation}deg)`; return; }
+  const fit = Math.min(cW / nW, cH / nH);   // contained size at 0°
+  const rW = nW * fit, rH = nH * fit;
+  const s  = Math.min(cW / rH, cH / rW);    // fit the swapped bounding box
+  img.style.transform = `rotate(${_lbRotation}deg) scale(${s})`;
+}
+
 function closeLightbox() {
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
@@ -600,6 +634,7 @@ function closeLightbox() {
   document.body.style.overflow = '';
   _lbMeta  = null;
   _lbIndex = -1;
+  _lbRotation = 0;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -843,6 +878,7 @@ export function initPhotos() {
   document.getElementById('photo-lb-close')?.addEventListener('click', closeLightbox);
   document.getElementById('photo-lb-dl')?.addEventListener('click', () => { if (_lbMeta) downloadPhoto(_lbMeta); });
   document.getElementById('photo-lb-print')?.addEventListener('click', () => { if (_lbMeta) printPhoto(_lbMeta); });
+  document.getElementById('photo-lb-rotate')?.addEventListener('click', rotateLightbox);
   document.getElementById('photo-lb-like')?.addEventListener('click', () => {
     const btn = document.getElementById('photo-lb-like');
     if (_lbMeta && btn) toggleLike(_lbMeta, btn);
@@ -876,7 +912,7 @@ export function initPhotos() {
 
   // Recompute crop overlay on resize (e.g. device rotate, window resize).
   window.addEventListener('resize', () => {
-    if (!document.getElementById('photo-lightbox')?.hidden) updateCropOverlay();
+    if (!document.getElementById('photo-lightbox')?.hidden) applyLbRotation();
   });
 
   load();
