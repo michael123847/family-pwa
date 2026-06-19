@@ -909,7 +909,7 @@ input[type=range]:active::-webkit-slider-thumb {
   background: rgba(0, 0, 0, 0.92);
   display: flex;
   flex-direction: column;
-  z-index: 100;
+  z-index: 200;   /* above the bottom tab-bar (z-index 100) so the footer caption shows */
   padding: env(safe-area-inset-top, 12px) 12px env(safe-area-inset-bottom, 12px);
 }
 .lightbox[hidden] { display: none !important; }
