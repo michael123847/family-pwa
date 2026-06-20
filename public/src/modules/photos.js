@@ -364,6 +364,7 @@ async function loadThumb(meta, img) {
     const url  = URL.createObjectURL(blob);
     objectUrls.set(meta.id, url);
     img.src = url;
+    if (meta.rotate) img.style.transform = `rotate(${meta.rotate}deg)`;
   } catch {
     img.classList.add('photo-thumb-failed');
     img.alt = 'Bild konnte nicht geladen werden';
@@ -429,7 +430,7 @@ function _updateNavButtons() {
 
 async function loadLightboxImage(meta) {
   _lbMeta = meta;
-  _lbRotation = 0;
+  _lbRotation = meta.rotate || 0;
   const lb      = document.getElementById('photo-lightbox');
   const content = document.getElementById('photo-lb-content');
   document.getElementById('photo-lb-caption').textContent = '';
@@ -437,6 +438,7 @@ async function loadLightboxImage(meta) {
   if (lbFooter) lbFooter.textContent = storedName(meta);
   const lbLike = document.getElementById('photo-lb-like');
   if (lbLike) syncLightboxLike(meta, lbLike);
+  content.style.transform = '';
   Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
   clearCropOverlay();
   try {
@@ -447,7 +449,7 @@ async function loadLightboxImage(meta) {
     const img = document.createElement('img');
     img.src = _lbUrl;
     img.alt = storedName(meta);
-    img.addEventListener('load', updateCropOverlay, { once: true });
+    img.addEventListener('load', applyLbRotation, { once: true });
     content.appendChild(img);
   } catch {
     const err = document.createElement('div');
@@ -520,7 +522,6 @@ function updateCropOverlay() {
   const content = document.getElementById('photo-lb-content');
   const overlay = document.getElementById('photo-lb-crop-overlay');
   if (!content || !overlay) return;
-  if (_lbRotation !== 0) { overlay.style.display = 'none'; return; }
   const img = content.querySelector('img');
   if (!img || !img.complete || !img.naturalWidth) {
     // Hide overlay if no image is loaded yet
@@ -595,40 +596,66 @@ function clearCropOverlay() {
 }
 
 // ── View rotation (display-only — does NOT change the JPEG or the print) ─────
-function rotateLightbox() {
+async function rotateLightbox() {
   _lbRotation = (_lbRotation + 90) % 360;
   applyLbRotation();
+  if (!_lbMeta) return;
+  _lbMeta.rotate = _lbRotation || undefined;
+  if (_lbRotation === 0) delete _lbMeta.rotate;
+  // Reflect the new rotation on the gallery grid thumbnail for this photo.
+  const grid = document.getElementById('photo-grid');
+  if (grid) {
+    const tiles = Array.from(grid.querySelectorAll('.photo-tile'));
+    const idx   = _gallery.indexOf(_lbMeta);
+    if (idx >= 0 && tiles[idx]) {
+      const thumb = tiles[idx].querySelector('img.photo-thumb');
+      if (thumb) thumb.style.transform = `rotate(${_lbRotation}deg)`;
+    }
+  }
+  // Persist optimistically; keep the in-memory value on network failure.
+  try {
+    await fetch(getActiveBase() + '/api/photos/' + _lbMeta.id + '/rotate', {
+      method:      'POST',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+      body:        JSON.stringify({ rotate: _lbRotation }),
+    });
+  } catch { /* keep optimistic value; next load() reconciles */ }
 }
 
 function applyLbRotation() {
   const content = document.getElementById('photo-lb-content');
   const img = content?.querySelector('img');
-  if (!img) return;
-  if (_lbRotation === 0) {
-    img.style.transform = '';
-    updateCropOverlay();          // crop preview only meaningful at 0°
+  if (!content) return;
+  if (_lbRotation === 0 || _lbRotation === 180) {
+    content.style.transform = _lbRotation === 0 ? '' : 'rotate(180deg)';
+    updateCropOverlay();
     return;
   }
-  clearCropOverlay();             // hide preview while rotated — the print is unaffected
-  if (_lbRotation === 180) {
-    img.style.transform = 'rotate(180deg)';
-    return;
-  }
-  // 90° / 270°: rotate, then scale so the rotated image still fits the box
+  // 90° / 270°: rotate the content box, then scale so it still fits the viewport.
+  // The crop overlay is a child of the content box and rotates with it.
   const cW = content.clientWidth, cH = content.clientHeight;
+  if (!img || !img.naturalWidth || !img.naturalHeight || !cW || !cH) {
+    content.style.transform = `rotate(${_lbRotation}deg)`;
+    updateCropOverlay();
+    return;
+  }
   const nW = img.naturalWidth, nH = img.naturalHeight;
-  if (!nW || !nH || !cW || !cH) { img.style.transform = `rotate(${_lbRotation}deg)`; return; }
   const fit = Math.min(cW / nW, cH / nH);   // contained size at 0°
   const rW = nW * fit, rH = nH * fit;
   const s  = Math.min(cW / rH, cH / rW);    // fit the swapped bounding box
-  img.style.transform = `rotate(${_lbRotation}deg) scale(${s})`;
+  content.style.transform = `rotate(${_lbRotation}deg) scale(${s})`;
+  updateCropOverlay();
 }
 
 function closeLightbox() {
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
   const content = document.getElementById('photo-lb-content');
-  if (content) Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
+  if (content) {
+    content.style.transform = '';
+    Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
+  }
   clearCropOverlay();
   if (_lbUrl) { URL.revokeObjectURL(_lbUrl); _lbUrl = null; }
   document.body.style.overflow = '';
