@@ -422,6 +422,12 @@ let _gallery = [];  // current rendered photo list — set by renderGrid
 let _lbIndex = -1;  // index of the currently open photo within _gallery
 let _lbRotation = 0; // view-only rotation (0/90/180/270) — never changes the JPEG or the print
 
+// ── Crop-mode state ───────────────────────────────────────────────────────────
+let _cropMode  = false;  // true while the user is in the Drucken→Abschicken flow
+let _cropPan   = 0;      // pan offset along the cut axis, in natural pixels
+let _cropRect  = null;   // { x, y, w, h } in natural px — updated by updateCropOverlay
+let _dragCleanup = null; // fn that removes the active pointer/touch drag listeners
+
 function _updateNavButtons() {
   const show = _gallery.length > 1;
   document.getElementById('photo-lb-prev')?.toggleAttribute('hidden', !show);
@@ -429,6 +435,8 @@ function _updateNavButtons() {
 }
 
 async function loadLightboxImage(meta) {
+  // Always exit crop mode when navigating to a new photo.
+  if (_cropMode) exitCropMode();
   _lbMeta = meta;
   _lbRotation = meta.rotate || 0;
   const lb      = document.getElementById('photo-lightbox');
@@ -478,11 +486,160 @@ function openLightbox(meta) {
   loadLightboxImage(meta);
 }
 
-async function printPhoto(meta) {
-  if (!confirm('Auf dem Heimdrucker drucken?\n\nBitte Fotopapier mit Druckseite nach unten einlegen.')) return;
+// Entering Drucken now enters crop-mode instead of immediately printing.
+function printPhoto(meta) {
+  enterCropMode();
+}
+
+// ── Crop-mode entry / exit ────────────────────────────────────────────────────
+
+function enterCropMode() {
+  if (!_lbMeta) return;
+  _cropMode = true;
+  _cropPan  = 0;
+  _cropRect = null;
+  const lb = document.getElementById('photo-lightbox');
+  if (lb) lb.classList.add('cropping');
+  // Hide prev/next nav while cropping.
+  document.getElementById('photo-lb-prev')?.toggleAttribute('hidden', true);
+  document.getElementById('photo-lb-next')?.toggleAttribute('hidden', true);
+  // Swap the toolbar: hide the normal actions, reveal Abschicken/Abbrechen.
+  // The global [hidden]{display:none!important} rule means visibility must be
+  // driven by the hidden attribute, not by a CSS class.
+  ['photo-lb-rotate', 'photo-lb-like', 'photo-lb-print', 'photo-lb-dl']
+    .forEach(id => document.getElementById(id)?.toggleAttribute('hidden', true));
+  ['photo-lb-send', 'photo-lb-crop-cancel']
+    .forEach(id => document.getElementById(id)?.toggleAttribute('hidden', false));
+  updateCropOverlay();
+  _bindCropDrag();
+}
+
+function exitCropMode() {
+  _cropMode = false;
+  _cropPan  = 0;
+  _cropRect = null;
+  const lb = document.getElementById('photo-lightbox');
+  if (lb) lb.classList.remove('cropping');
+  _unbindCropDrag();
+  clearCropOverlay();
+  // Restore the normal toolbar; re-hide Abschicken/Abbrechen.
+  ['photo-lb-rotate', 'photo-lb-like', 'photo-lb-print', 'photo-lb-dl']
+    .forEach(id => document.getElementById(id)?.toggleAttribute('hidden', false));
+  ['photo-lb-send', 'photo-lb-crop-cancel']
+    .forEach(id => document.getElementById(id)?.toggleAttribute('hidden', true));
+  // Restore prev/next visibility (only when gallery has >1 photo).
+  _updateNavButtons();
+}
+
+// ── Drag handler for crop panning ─────────────────────────────────────────────
+// The drag adjusts _cropPan along the cut axis (X if sides are cut, Y if top/bottom
+// are cut). Screen deltas are divided by the render scale to convert to natural px.
+// Rotation-aware axis mapping: at 90/270° a horizontal screen drag maps to the
+// vertical cut axis, and vice-versa. At 180° the sign of X is flipped.
+
+function _bindCropDrag() {
+  _unbindCropDrag(); // clear any previous handlers
+
+  const content = document.getElementById('photo-lb-content');
+  if (!content) return;
+
+  let startX = 0, startY = 0, startPan = 0;
+  let dragging = false;
+
+  function getScale() {
+    const img = content.querySelector('img');
+    if (!img || !img.naturalWidth || !img.naturalHeight) return 1;
+    const boxW = content.clientWidth, boxH = content.clientHeight;
+    return Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
+  }
+
+  // Determine which screen-axis maps to the cut axis, and its sign.
+  // Returns { useX: bool, sign: 1|-1 } where useX means horizontal screen drag
+  // drives the pan (i.e. the cut axis is X in natural coords).
+  function dragMapping() {
+    const img = content.querySelector('img');
+    if (!img) return { useX: true, sign: 1 };
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const isLandscape = W > H;
+    const targetAR = isLandscape ? 3 / 2 : 2 / 3;
+    const imgAR = W / H;
+    // Cut axis: X when sides are cut (imgAR > targetAR), Y when top/bottom cut.
+    const cutAxisIsX = imgAR > targetAR;
+    // At rotation 0/180 a horizontal screen drag → X-axis in natural coords.
+    // At rotation 90/270 a horizontal screen drag → Y-axis.
+    let useX; // true = horizontal screen movement drives the cut axis
+    if (_lbRotation === 0 || _lbRotation === 180) {
+      useX = cutAxisIsX;
+    } else {
+      // 90/270: screen axes are swapped relative to natural image axes
+      useX = !cutAxisIsX;
+    }
+    // Sign: at 180° horizontal drag is flipped; at 270° vertical is flipped.
+    let sign = 1;
+    if (_lbRotation === 180 && cutAxisIsX)  sign = -1;
+    if (_lbRotation === 90  && !cutAxisIsX) sign = -1;
+    if (_lbRotation === 270 && cutAxisIsX)  sign = -1;
+    return { useX, sign };
+  }
+
+  function onPointerDown(e) {
+    if (!_cropMode) return;
+    if (e.target.closest('button')) return;
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startPan = _cropPan;
+    content.setPointerCapture && content.setPointerCapture(e.pointerId);
+    content.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+
+  function onPointerMove(e) {
+    if (!_cropMode || !dragging) return;
+    const { useX, sign } = dragMapping();
+    const screenDelta = useX ? (e.clientX - startX) : (e.clientY - startY);
+    const scale = getScale();
+    const naturalDelta = scale > 0 ? screenDelta / scale : 0;
+    _cropPan = startPan + sign * naturalDelta;
+    updateCropOverlay();
+    e.preventDefault();
+  }
+
+  function onPointerUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    content.style.cursor = '';
+    content.releasePointerCapture && content.releasePointerCapture(e.pointerId);
+  }
+
+  // Pointer Events cover mouse, touch and pen on every current browser
+  // (iOS 13+, Android, Windows, macOS, Linux). Crop mode disables the gallery
+  // swipe/scroll, so a single pointer stream is unambiguous; `touch-action: none`
+  // (set on .lightbox.cropping .lightbox-content in CSS) stops the browser from
+  // scrolling/zooming the image during a touch drag.
+  content.addEventListener('pointerdown',   onPointerDown);
+  content.addEventListener('pointermove',   onPointerMove);
+  content.addEventListener('pointerup',     onPointerUp);
+  content.addEventListener('pointercancel', onPointerUp);
+
+  _dragCleanup = () => {
+    content.removeEventListener('pointerdown',   onPointerDown);
+    content.removeEventListener('pointermove',   onPointerMove);
+    content.removeEventListener('pointerup',     onPointerUp);
+    content.removeEventListener('pointercancel', onPointerUp);
+  };
+}
+
+function _unbindCropDrag() {
+  if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
+}
+
+// ── Actual print fetch (fires after user confirms paper-insertion) ─────────────
+
+async function doPrint(meta, crop) {
   // Feedback must show INSIDE the lightbox — the page's #photo-status is hidden
-  // behind the fullscreen overlay. Use the button label + caption for messages.
-  const btn = document.getElementById('photo-lb-print');
+  // behind the fullscreen overlay. Use the send button label + caption for messages.
+  const btn = document.getElementById('photo-lb-send');
   const cap = document.getElementById('photo-lb-caption');
   if (btn) { btn.disabled = true; btn.textContent = 'Drucke…'; }
   try {
@@ -490,22 +647,22 @@ async function printPhoto(meta) {
       method:      'POST',
       credentials: 'omit',
       headers:     { 'Content-Type': 'application/json', ...authHeaders() },
-      body:        JSON.stringify({ source: 'photo', id: meta.id }),
+      body:        JSON.stringify({ source: 'photo', id: meta.id, crop }),
     });
     if (r.ok) {
       if (btn) btn.textContent = '✓ Gesendet';
     } else {
       const b = await r.json().catch(() => ({}));
       if (cap) cap.textContent = b.error || ('Druck fehlgeschlagen (HTTP ' + r.status + ')');
-      if (btn) btn.textContent = 'Drucken';
+      if (btn) btn.textContent = 'Abschicken';
     }
   } catch {
     if (cap) cap.textContent = 'Druck fehlgeschlagen — Server nicht erreichbar.';
-    if (btn) btn.textContent = 'Drucken';
+    if (btn) btn.textContent = 'Abschicken';
   } finally {
     if (btn) {
       btn.disabled = false;
-      setTimeout(() => { if (btn.textContent === '✓ Gesendet') btn.textContent = 'Drucken'; }, 2500);
+      setTimeout(() => { if (btn.textContent === '✓ Gesendet') btn.textContent = 'Abschicken'; }, 2500);
     }
   }
 }
@@ -518,13 +675,21 @@ async function printPhoto(meta) {
 //   cover-crop:  if imgAR > targetAR → cut sides; else → cut top/bottom
 // The image is displayed with object-fit:contain so we first compute the
 // rendered image rect inside the content box, then apply the crop math.
+// Only draws when _cropMode is true; otherwise hides the overlay.
+// Stores the resulting kept rect in _cropRect (natural px) for the print payload.
 function updateCropOverlay() {
   const content = document.getElementById('photo-lb-content');
   const overlay = document.getElementById('photo-lb-crop-overlay');
   if (!content || !overlay) return;
+
+  // Only show the overlay in crop mode.
+  if (!_cropMode) {
+    overlay.style.display = 'none';
+    return;
+  }
+
   const img = content.querySelector('img');
   if (!img || !img.complete || !img.naturalWidth) {
-    // Hide overlay if no image is loaded yet
     overlay.style.display = 'none';
     return;
   }
@@ -535,21 +700,41 @@ function updateCropOverlay() {
   const targetAR = isLandscape ? 3 / 2 : 2 / 3;
   const imgAR    = W / H;
 
-  // Kept rect in natural-image pixels
-  let keptW, keptH, cropX, cropY;
+  // Base centered kept rect in natural-image pixels
+  let keptW, keptH, baseCropX, baseCropY;
   if (imgAR > targetAR) {
-    // cut sides
+    // cut sides — pan is along X
     keptW = Math.round(H * targetAR);
     keptH = H;
-    cropX = (W - keptW) / 2;
-    cropY = 0;
+    baseCropX = (W - keptW) / 2;
+    baseCropY = 0;
   } else {
-    // cut top/bottom
+    // cut top/bottom — pan is along Y
     keptW = W;
     keptH = Math.round(W / targetAR);
-    cropX = 0;
-    cropY = (H - keptH) / 2;
+    baseCropX = 0;
+    baseCropY = (H - keptH) / 2;
   }
+
+  // Apply pan along the cut axis (clamped so the kept rect stays within the image).
+  let cropX, cropY;
+  if (imgAR > targetAR) {
+    // Cut axis is X; clamp pan so kept rect stays in [0 .. W-keptW]
+    cropX = Math.max(0, Math.min(W - keptW, baseCropX + _cropPan));
+    cropY = 0;
+  } else {
+    // Cut axis is Y; clamp pan so kept rect stays in [0 .. H-keptH]
+    cropX = 0;
+    cropY = Math.max(0, Math.min(H - keptH, baseCropY + _cropPan));
+  }
+
+  // Store the kept rect for the print payload (rounded natural px).
+  _cropRect = {
+    x: Math.round(cropX),
+    y: Math.round(cropY),
+    w: keptW,
+    h: keptH,
+  };
 
   // Rendered image rect inside content box (object-fit: contain)
   const boxW = content.clientWidth;
@@ -649,6 +834,8 @@ function applyLbRotation() {
 }
 
 function closeLightbox() {
+  // Always exit crop mode first (cleans up drag handlers + class).
+  if (_cropMode) exitCropMode();
   const lb = document.getElementById('photo-lightbox');
   if (lb) lb.hidden = true;
   const content = document.getElementById('photo-lb-content');
@@ -910,9 +1097,28 @@ export function initPhotos() {
     const btn = document.getElementById('photo-lb-like');
     if (_lbMeta && btn) toggleLike(_lbMeta, btn);
   });
+
+  // Abschicken: confirm paper insertion, then send the crop to the server.
+  document.getElementById('photo-lb-send')?.addEventListener('click', () => {
+    if (!_lbMeta || !_cropMode) return;
+    if (!confirm('Auf dem Heimdrucker drucken?\n\nBitte Fotopapier mit Druckseite nach unten einlegen.')) return;
+    const meta = _lbMeta;
+    const crop = _cropRect ? { ..._cropRect } : null;
+    doPrint(meta, crop);
+    exitCropMode();
+  });
+
+  // Abbrechen: leave crop mode without printing.
+  document.getElementById('photo-lb-crop-cancel')?.addEventListener('click', () => {
+    if (_cropMode) exitCropMode();
+  });
+
   document.getElementById('photo-lb-prev')?.addEventListener('click', e => { e.stopPropagation(); prev(); });
   document.getElementById('photo-lb-next')?.addEventListener('click', e => { e.stopPropagation(); next(); });
+
+  // Backdrop click: only close the lightbox when NOT in crop mode.
   document.getElementById('photo-lightbox')?.addEventListener('click', e => {
+    if (_cropMode) return;
     const lb = document.getElementById('photo-lightbox');
     if (e.target === lb || e.target === document.getElementById('photo-lb-content')) closeLightbox();
   });
@@ -921,10 +1127,13 @@ export function initPhotos() {
     let swipeX = 0, swipeY = 0;
     lbEl.addEventListener('touchstart', e => {
       if (e.target.closest('button')) return;
+      // Crop drag is handled separately on the content element; ignore here.
+      if (_cropMode) return;
       swipeX = e.touches[0].clientX; swipeY = e.touches[0].clientY;
     }, { passive: true });
     lbEl.addEventListener('touchend', e => {
       if (e.target.closest('button')) return;
+      if (_cropMode) return;
       const dx = e.changedTouches[0].clientX - swipeX;
       const dy = e.changedTouches[0].clientY - swipeY;
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) dx < 0 ? next() : prev();
@@ -932,12 +1141,20 @@ export function initPhotos() {
   }
   document.addEventListener('keydown', e => {
     if (document.getElementById('photo-lightbox')?.hidden) return;
-    if (e.key === 'Escape')     closeLightbox();
+    if (e.key === 'Escape') {
+      // In crop mode Escape cancels the crop instead of closing the lightbox.
+      if (_cropMode) { exitCropMode(); return; }
+      closeLightbox();
+      return;
+    }
+    // Arrow keys are disabled in crop mode (drag is the only pan mechanism).
+    if (_cropMode) return;
     if (e.key === 'ArrowLeft')  prev();
     if (e.key === 'ArrowRight') next();
   });
 
   // Recompute crop overlay on resize (e.g. device rotate, window resize).
+  // updateCropOverlay guards on _cropMode internally.
   window.addEventListener('resize', () => {
     if (!document.getElementById('photo-lightbox')?.hidden) applyLbRotation();
   });
