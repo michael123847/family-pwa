@@ -986,6 +986,14 @@ input[type=range]:active::-webkit-slider-thumb {
   padding: 1rem;
 }
 
+/* ── Crop mode — active while the user is repositioning the 4x6 crop ────────
+   .lightbox.cropping hides the normal action buttons (via JS toggling hidden)
+   and enables grab cursor on the content area for dragging.
+   Button visibility is managed by toggling the [hidden] attribute in JS so
+   the global [hidden]{display:none!important} rule stays authoritative.       */
+.lightbox.cropping .lightbox-content { cursor: grab; touch-action: none; }
+.lightbox.cropping .lightbox-content:active { cursor: grabbing; }
+
 .lightbox-footer {
   width: 100%;
   padding: 10px 14px;
