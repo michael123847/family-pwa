@@ -45,7 +45,7 @@ export async function boot() {
   applyRoleVisibility();
   // Re-apply whenever the role changes (admin promotion, cold-start retry).
   window.addEventListener('pwa:role-changed', applyRoleVisibility);
-  initTabs();
+  const { show: showPage, saved: initialPage } = initTabs();
 
   // Register the Service Worker for offline caching of the app shell.
   // Errors are silently ignored — the app works without a SW.
@@ -85,6 +85,15 @@ export async function boot() {
   initAi();
   initShare();
   initAdminBoard();
+
+  // Restore the last-open page only now — every subapp's `pwa:page`
+  // listener is registered by this point. Firing it from inside initTabs()
+  // (i.e. before initAi() etc. ran) silently dropped the cold-boot signal
+  // that ai.js's resumePendingJob() needs to re-attach to a still-running
+  // server job: the KI-Assistent answer would keep generating on the
+  // server but the UI stayed stuck on the "thinking" cursor forever,
+  // reading as "the message disappeared".
+  showPage(initialPage);
 
   // Show initial server status, then refresh every 30 s (matches health-check TTL).
   updateLocalStatus();
@@ -161,7 +170,6 @@ function initTabs() {
   const ownerName = SUBPAGE_OWNER[saved] ?? saved;
   const owner     = document.querySelector(`[data-page="${ownerName}"], [data-subpage="${saved}"]`);
   if (owner && owner.dataset.minRole && !hasRole(owner.dataset.minRole)) saved = 'home';
-  show(saved);
 
   // External navigation requests (e.g., SW notification tap fires this).
   window.addEventListener('pwa:navigate', e => {
@@ -181,4 +189,9 @@ function initTabs() {
   document.querySelectorAll('[data-back]').forEach(el => {
     el.addEventListener('click', () => show(el.dataset.back));
   });
+
+  // `show(saved)` is deliberately NOT called here — see the call site in
+  // boot(), which fires it only after every subapp's own `pwa:page`
+  // listener is registered.
+  return { show, saved };
 }
