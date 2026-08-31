@@ -283,9 +283,13 @@ function renderGrid(photos) {
   const grid  = document.getElementById('photo-grid');
   const empty = document.getElementById('photo-empty');
 
-  // Release the object URLs from the previous render.
-  objectUrls.forEach(url => URL.revokeObjectURL(url));
-  objectUrls = new Map();
+  // Release object URLs only for photos that left the grid; keep the rest so a
+  // re-render (tab switch, online event, upload) doesn't re-download every
+  // thumbnail. Mirrors the event page's renderGallery().
+  const incomingIds = new Set(photos.map(p => p.id));
+  for (const [id, url] of objectUrls) {
+    if (!incomingIds.has(id)) { URL.revokeObjectURL(url); objectUrls.delete(id); }
+  }
 
   grid.innerHTML = '';
 
@@ -356,6 +360,12 @@ function renderGrid(photos) {
 
 /** Fetches one photo's bytes and shows them in the given <img>. */
 async function loadThumb(meta, img) {
+  // Apply the persisted display-rotation regardless of cache state — the
+  // transform depends only on meta.rotate, and the cache-hit path below
+  // returns early.
+  if (meta.rotate) img.style.transform = `rotate(${meta.rotate}deg)`;
+  const cached = objectUrls.get(meta.id);
+  if (cached) { img.src = cached; return; }
   try {
     // ?thumb=1 → small server-generated JPEG for the grid. Download and any
     // full view still fetch the original (no ?thumb). Falls back to the full
@@ -364,7 +374,6 @@ async function loadThumb(meta, img) {
     const url  = URL.createObjectURL(blob);
     objectUrls.set(meta.id, url);
     img.src = url;
-    if (meta.rotate) img.style.transform = `rotate(${meta.rotate}deg)`;
   } catch {
     img.classList.add('photo-thumb-failed');
     img.alt = 'Bild konnte nicht geladen werden';

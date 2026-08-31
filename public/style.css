@@ -929,7 +929,8 @@ input[type=range]:active::-webkit-slider-thumb {
   white-space: nowrap;
   min-width: 0;
 }
-.lightbox-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.lightbox-caption:empty { display: none; }
+.lightbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
 .lightbox-actions button {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
@@ -940,6 +941,11 @@ input[type=range]:active::-webkit-slider-thumb {
   cursor: pointer;
 }
 .lightbox-actions button:hover { background: rgba(255, 255, 255, 0.16); }
+@media (max-width: 430px) {
+  .lightbox-bar            { gap: 8px; }
+  .lightbox-actions        { gap: 6px; }
+  .lightbox-actions button { padding: 8px 8px; font-size: 0.8rem; }
+}
 .lightbox-content {
   flex: 1;
   display: flex;
