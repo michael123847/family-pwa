@@ -15,7 +15,7 @@ Zugangsschlüssel.
 - **Hauschat** — Familien-Messenger, optionale Push-Benachrichtigungen,
   Ultraschall-Fallback via [ggwave](https://github.com/ggerganov/ggwave)
 - **KI-Assistent** — Chat mit lokalem Ollama-Modell, screen-lock-resistent
-- **Share** — Allzweck-Dateiablage, ≤ 10 MB
+- **Share** — Allzweck-Dateiablage, ≤ 100 MB
 - **Farbe / Info** — Hilfsmittel & Diagnose
 
 Rollen-basiert (Visitor / Family / Power / Admin) — die ersten beiden ohne

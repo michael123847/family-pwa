@@ -1,7 +1,7 @@
 /**
  * share.js — Allzweck-Dateiablage backed by the local WLAN server.
  *
- * A parallel implementation to photos.js for arbitrary file types up to 10 MB.
+ * A parallel implementation to photos.js for arbitrary file types up to 100 MB.
  * Key differences from photos:
  *  - Any file type accepted (no MIME filter)
  *  - The on-disk filename is the original upload name (sanitised only against
@@ -21,7 +21,7 @@ const shareUrl   = () => getActiveBase() + CONFIG.LOCAL_SHARE_PATH;
 const foldersUrl = () => shareUrl() + '/folders';
 
 const MAX_FOLDER_DEPTH = 2;
-const MAX_BYTES        = 10 * 1024 * 1024;
+const MAX_BYTES        = 100 * 1024 * 1024;
 
 let currentFolder = '';        // "" = root
 let folderList    = [];        // [{ path, fileCount }, ...]
@@ -235,7 +235,7 @@ async function deleteFile(meta) {
 /** Uploads one file. On 409 (conflict) returns the existing meta so the caller can prompt the user. */
 async function uploadOne(file, onConflict) {
   if (file.size > MAX_BYTES) {
-    return { error: `„${file.name}" überschreitet das 10 MB-Limit.` };
+    return { error: `„${file.name}" überschreitet das 100 MB-Limit.` };
   }
   const qs = new URLSearchParams({
     name:       file.name,

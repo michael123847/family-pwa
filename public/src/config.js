@@ -24,7 +24,7 @@ export const CONFIG = {
   // Shown in the Info subapp so it is easy to verify which build a device
   // is really running. Bump this together with VERSION in sw.js on every
   // deploy — they should always match.
-  APP_VERSION: 'v1.2.11',
+  APP_VERSION: 'v1.2.12',
 
   // ── Local server — only the generic mDNS hostname is public ────────
   // LAN_BASE  — mDNS hostname, works on the home Wi-Fi on devices that
@@ -41,7 +41,7 @@ export const CONFIG = {
   LOCAL_HEALTH_PATH: '/api/health',   // simple ping endpoint to check availability
   LOCAL_TODO_PATH:   '/api/todos',    // CRUD endpoint for the shopping/todo list
   LOCAL_PHOTOS_PATH: '/api/photos',   // upload / list / download endpoint for the photo gallery
-  LOCAL_SHARE_PATH:  '/api/share',    // general-purpose file storage (any type, ≤ 10 MB)
+  LOCAL_SHARE_PATH:  '/api/share',    // general-purpose file storage (any type, ≤ 100 MB)
   LOCAL_CHAT_PATH:   '/api/chat',     // Hauschat: device registry + message relay
   LOCAL_CONFIG_PATH: '/api/config',   // weather location + transit stops (kept off the public repo)
   LOCAL_BG_PATH:     '/assets/family-bg.jpg', // family photo served by the local server
