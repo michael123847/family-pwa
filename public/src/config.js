@@ -21,10 +21,10 @@
 export const CONFIG = {
 
   // ── App version ────────────────────────────────────────────────────
-  // Shown in the Info subapp so it is easy to verify which build a device
-  // is really running. Bump this together with VERSION in sw.js on every
-  // deploy — they should always match.
-  APP_VERSION: 'v1.2.12',
+  // Single source of truth: version.js (loaded before this module by
+  // index.html; sw.js importScripts the same file). Bump ONLY version.js.
+  // Fallback covers non-browser/module-only contexts (tests, tooling).
+  APP_VERSION: globalThis.__APP_VERSION || 'dev',
 
   // ── Local server — only the generic mDNS hostname is public ────────
   // LAN_BASE  — mDNS hostname, works on the home Wi-Fi on devices that

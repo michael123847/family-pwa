@@ -62,8 +62,10 @@ Ohne sie bleibt die Ultraschall-Funktion ausgeblendet, der Rest läuft normal.
 
 ## Versionierung
 
-`public/src/config.js` → `APP_VERSION` und `public/sw.js` → `VERSION` werden
-bei jedem Deploy gemeinsam hochgezählt; die Info-Subapp zeigt beide an.
+`public/version.js` ist die einzige Quelle für die App-Version — bei jedem
+Deploy nur diese Datei hochzählen. `public/src/config.js` (`APP_VERSION`)
+und `public/sw.js` (`VERSION`) lesen den Wert von dort; die Info-Subapp
+zeigt ihn an.
 
 ## Deployment
 
