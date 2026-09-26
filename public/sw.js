@@ -87,8 +87,11 @@ const OPTIONAL_ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const cache = await caches.open(APP_SHELL);
-    await cache.addAll(SHELL_ASSETS);
-    await Promise.allSettled(OPTIONAL_ASSETS.map(a => cache.add(a)));
+    // Fetch shell assets with cache:'reload' so we bypass the browser HTTP cache
+    // (GitHub Pages sends max-age=600). Otherwise a still-fresh stale copy can get
+    // baked into this SW cache and, since SW caches ignore max-age, served forever.
+    await cache.addAll(SHELL_ASSETS.map(u => new Request(u, { cache: 'reload' })));
+    await Promise.allSettled(OPTIONAL_ASSETS.map(a => cache.add(new Request(a, { cache: 'reload' }))));
     await self.skipWaiting();
   })());
 });
