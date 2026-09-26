@@ -18,7 +18,7 @@
  *    Strategy: network-first with 4-second timeout — try the network, fall back
  *    to cached data if the network is slow or offline.
  *
- * Local server requests (REDACTED-LAN-IP-A, *.local) are NEVER intercepted.
+ * Local server requests (LAN IPs, *.local) are NEVER intercepted.
  * They need the Authorization header attached by the app and must always
  * return fresh data — caching them here would break authentication and
  * show stale todos or images.

@@ -14,7 +14,7 @@
     them into localStorage ('pwa.bases') so probeBase() can reach the server
     on the LAN IP or via Tailscale without mDNS. The admin makes a QR code of:
 
-      https://michael123847.github.io/family-pwa/connect.html?lan_ip=https://REDACTED-LAN-IP-C:8443&ts=https://server.REDACTED-TAILNET-B.ts.net:8443
+      https://michael123847.github.io/family-pwa/connect.html?lan_ip=https://<LAN-IP>:8443&ts=https://<host>.<tailnet>.ts.net:8443
 
     A new family member scans it once; the device then opens the app already
     knowing how to reach home.
@@ -57,8 +57,41 @@
       const params = new URLSearchParams(location.search);
       const lanIp  = (params.get('lan_ip') || '').trim();
       const ts     = (params.get('ts')     || '').trim();
-      // Only accept plausible https URLs — no javascript:, no garbage.
-      const valid  = u => /^https:\/\/[A-Za-z0-9.\-]+(:\d+)?\/?$/.test(u);
+      // Host allowlist — deliberately stricter than the prefix-based bypass
+      // in public/sw.js. That one only gates Service-Worker caching, so a
+      // decimal-prefix match is an acceptable false-positive rate; this one
+      // decides which hosts receive the device's Bearer token, so it
+      // requires a FULL dotted-quad IPv4 in a private range, or a hostname
+      // made only of valid DNS labels ending in .local or .ts.net — never a
+      // prefix/substring match that a hostile domain name could satisfy.
+      // Known residual: .ts.net admits any tailnet's MagicDNS name,
+      // including a stranger's Funnel-exposed host — it can't be pinned to
+      // just our own tailnet here without hard-coding (and thereby
+      // publishing) our tailnet name.
+      const isValidLabel = l => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(l);
+      const isPrivateIPv4 = h => {
+        // Each octet must be "0" or start with a non-zero digit — a leading
+        // zero (e.g. "010") is parsed as octal by browsers, not decimal.
+        const m = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/.exec(h);
+        if (!m) return false;
+        const o = m.slice(1, 5).map(Number);
+        if (o.some(n => n > 255)) return false;
+        const [a, b] = o;
+        return a === 10 ||
+               (a === 172 && b >= 16 && b <= 31) ||
+               (a === 192 && b === 168) ||
+               (a === 100 && b >= 64 && b <= 127);
+      };
+      const isLocalHost = hRaw => {
+        const h = hRaw.toLowerCase();
+        if (isPrivateIPv4(h)) return true;
+        if (!(h.endsWith('.local') || h.endsWith('.ts.net'))) return false;
+        return h.split('.').every(isValidLabel);
+      };
+      const valid  = u => {
+        const m = /^https:\/\/([A-Za-z0-9.\-]+)(:\d+)?\/?$/.exec(u);
+        return !!m && isLocalHost(m[1]);
+      };
 
       const card = document.getElementById('card');
       const msg  = document.getElementById('msg');
