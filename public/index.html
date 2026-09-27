@@ -384,6 +384,9 @@
     </button>
   </nav>
 
+  <!-- version.js first (classic script, sets self.__APP_VERSION) — the single
+       version bump point shared with sw.js; src/config.js reads it. -->
+  <script src="version.js"></script>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

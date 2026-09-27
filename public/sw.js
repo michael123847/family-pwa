@@ -29,9 +29,10 @@
  *  current version's set.
  */
 
-// Bump on every deploy. Keep in sync with CONFIG.APP_VERSION in src/config.js
-// (the Info subapp compares the two to flag a pending update).
-const VERSION   = 'v1.2.12';
+// VERSION comes from version.js — the single bump point, shared with
+// CONFIG.APP_VERSION (src/config.js reads the same file in window scope).
+importScripts('./version.js');
+const VERSION   = self.__APP_VERSION;
 // App-specific prefix avoids cross-contamination with other PWAs on the same
 // GitHub Pages origin whose caches are visible via the shared caches API.
 const APP_SHELL = 'fpwa-shell-'   + VERSION;
@@ -48,6 +49,7 @@ const SHELL_ASSETS = [
   './index.html',
   './style.css',
   './manifest.webmanifest',
+  './version.js',
   './src/main.js',
   './src/app.js',
   './src/config.js',
@@ -87,8 +89,11 @@ const OPTIONAL_ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const cache = await caches.open(APP_SHELL);
-    await cache.addAll(SHELL_ASSETS);
-    await Promise.allSettled(OPTIONAL_ASSETS.map(a => cache.add(a)));
+    // Fetch shell assets with cache:'reload' so we bypass the browser HTTP cache
+    // (GitHub Pages sends max-age=600). Otherwise a still-fresh stale copy can get
+    // baked into this SW cache and, since SW caches ignore max-age, served forever.
+    await cache.addAll(SHELL_ASSETS.map(u => new Request(u, { cache: 'reload' })));
+    await Promise.allSettled(OPTIONAL_ASSETS.map(a => cache.add(new Request(a, { cache: 'reload' }))));
     await self.skipWaiting();
   })());
 });
