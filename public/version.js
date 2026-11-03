@@ -10,4 +10,4 @@
  * in the service-worker byte-diff update check, so changing this file alone
  * triggers the new-shell rollout on the target platform (Android Chrome).
  */
-self.__APP_VERSION = 'v1.2.13';
+self.__APP_VERSION = 'v1.2.14';

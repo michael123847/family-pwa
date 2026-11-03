@@ -1426,9 +1426,11 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 .ai-model-select:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Without this, the dropdown panel inherits a white OS background but keeps
-   the parent's white text, making unselected items invisible until hovered. */
+   the parent's white text, making unselected items invisible until hovered.
+   The background must be OPAQUE (--bg): the translucent --card token gets
+   composited over the popup's white canvas, leaving white text on white. */
 .ai-model-select option {
-  background: var(--card);
+  background: var(--bg);
   color: var(--text);
 }
 
