@@ -139,10 +139,12 @@ self.addEventListener('fetch', e => {
   //   - 100.64.0.0/10     — Tailscale CGNAT range (raw IP form)
   //   - 192.168.0.0/16    — typical home LAN range
   //   - 10.0.0.0/8        — alt home/office LAN range
+  //   - 172.16-172.31     — third private range (RFC 1918)
   if (url.hostname.endsWith('.local') ||
       url.hostname.endsWith('.ts.net') ||
       /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(url.hostname) ||
       /^192\.168\./.test(url.hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname) ||
       /^10\./.test(url.hostname)) {
     return;
   }
@@ -214,6 +216,20 @@ self.addEventListener('push', e => {
         data:     { url: './#ai' },
       });
     })());
+  } else if (data.title) {
+    // Any other typed payload (e.g. the server's admin alert
+    // {type:'admin', title, body}): a plain notification that opens the app.
+    const type = String(data.type || 'info');
+    e.waitUntil(
+      self.registration.showNotification(String(data.title), {
+        body:     data.body || '',
+        tag:      type,
+        renotify: true,
+        icon:     './icons/icon-192.png',
+        badge:    './icons/icon-96.png',
+        data:     { url: './' },
+      })
+    );
   }
 });
 
@@ -225,7 +241,9 @@ self.addEventListener('push', e => {
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const url     = e.notification.data?.url || './#hauschat';
-  const msgType = url.includes('#ai') ? 'open-ai' : 'open-hauschat';
+  // Only the two chat/AI notifications route inside the app; any other
+  // notification just brings the app to the front.
+  const msgType = url === './#ai' ? 'open-ai' : url === './#hauschat' ? 'open-hauschat' : null;
   e.waitUntil((async () => {
     const allClients = await self.clients.matchAll({
       type:            'window',
@@ -235,7 +253,7 @@ self.addEventListener('notificationclick', e => {
       // Prefer focusing an existing window.
       try {
         await c.focus();
-        c.postMessage({ type: msgType });
+        if (msgType) c.postMessage({ type: msgType });
         return;
       } catch { /* fall through to openWindow */ }
     }

@@ -47,6 +47,12 @@ function lineClass(num) {
   return ['2', '3', '31'].includes(String(num)) ? `line-${num}` : 'line-other';
 }
 
+/** Escapes text for use in innerHTML (labels and departures come from the network). */
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;');
+}
+
 /**
  * Renders all stop groups into the #transit-container element.
  *
@@ -57,20 +63,20 @@ function renderGroups(groups) {
   container.innerHTML = groups.map(g => {
     if (!g.departures.length) {
       return `<div class="transit-group">
-        <div class="transit-group-header">${g.label}</div>
+        <div class="transit-group-header">${esc(g.label)}</div>
         <div class="transit-row" style="color:var(--text-dim);font-size:.82rem">
           ${g.error ? 'Fehler beim Laden' : 'Keine Abfahrten'}
         </div>
       </div>`;
     }
     return `<div class="transit-group">
-      <div class="transit-group-header">${g.label}</div>
+      <div class="transit-group-header">${esc(g.label)}</div>
       ${g.departures.map(d => {
         const delayed = d.delay > 0;
         return `<div class="transit-row">
-          <span class="transit-line ${lineClass(d.line)}">${d.line}</span>
-          <span class="transit-to">${d.to}</span>
-          <span class="transit-time"${delayed ? ' style="color:#c0504d"' : ''}>${d.time}</span>
+          <span class="transit-line ${lineClass(d.line)}">${esc(d.line)}</span>
+          <span class="transit-to">${esc(d.to)}</span>
+          <span class="transit-time"${delayed ? ' style="color:#c0504d"' : ''}>${esc(d.time)}</span>
           <span class="transit-delay">${delayed ? '+' + d.delay + '′' : ''}</span>
         </div>`;
       }).join('')}

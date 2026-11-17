@@ -149,45 +149,58 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { probeBase(); });
 }
 
+// The health request currently in flight, shared by concurrent callers: on
+// "online" or a tab switch every module asks at once, and each used to fire
+// its own request.
+let _inflight = null;
+let _inflightStart = 0; // Date.now() when _inflight started
+
+// A request younger than this is kept by invalidateLocal(): modules call
+// invalidateLocal() right before isLocalAvailable() and must still share it.
+const SHARE_WINDOW_MS = 250;
+
 /**
  * Checks whether the local server is currently reachable on the active base.
- * Uses a 30-second cache to avoid spamming health checks.
+ * Uses a 30-second cache to avoid spamming health checks; callers that arrive
+ * while a check is running share its request.
  *
  * @returns {Promise<boolean>}
  */
-export async function isLocalAvailable() {
+export function isLocalAvailable() {
   const now = Date.now();
 
   // Return cached result if it is still within the TTL window.
-  if (_available !== null && now - _lastCheck < TTL) return _available;
+  if (_available !== null && now - _lastCheck < TTL) return Promise.resolve(_available);
+  if (_inflight) return _inflight;
 
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
-
-  try {
-    const r = await fetch(getActiveBase() + CONFIG.LOCAL_HEALTH_PATH, {
-      signal:      ctrl.signal,
-      cache:       'no-store',
-      credentials: 'omit',
-      headers:     authHeaders(),
-    });
-
-    if (r.status === 401) {
-      // Token rejected — auth.js's whoami flow will handle re-enrollment.
-      // We don't clearToken() here anymore (that was the v31 over-aggressive
-      // path); just report the server as unreachable for this caller.
-      _available = false;
-    } else {
-      _available = r.ok;
+  const run = (async () => {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CONFIG.HEALTH_TIMEOUT_MS);
+    let ok;
+    try {
+      const r = await fetch(getActiveBase() + CONFIG.LOCAL_HEALTH_PATH, {
+        signal:      ctrl.signal,
+        cache:       'no-store',
+        credentials: 'omit',
+        headers:     authHeaders(),
+      });
+      // 401: token rejected — auth.js's whoami flow handles re-enrollment.
+      // We don't clearToken() here (that was the v31 over-aggressive path);
+      // just report the server as unreachable for this caller.
+      ok = r.status === 401 ? false : r.ok;
+    } catch {
+      ok = false;
+    } finally {
+      clearTimeout(timer);
     }
-  } catch {
-    _available = false;
-  } finally {
-    clearTimeout(timer);
-    _lastCheck = now;
-  }
-
-  return _available;
+    // invalidateLocal() while this request ran (e.g. the base changed) detaches
+    // it: its answer is still returned to its callers but is not cached.
+    if (_inflight === run) { _available = ok; _lastCheck = now; _inflight = null; }
+    return ok;
+  })();
+  _inflight = run;
+  _inflightStart = now;
+  return run;
 }
 
 /**
@@ -195,4 +208,9 @@ export async function isLocalAvailable() {
  * fresh health check. Called when a request fails unexpectedly (e.g., server
  * went offline mid-session) or when the active base just changed.
  */
-export function invalidateLocal() { _available = null; }
+export function invalidateLocal() {
+  _available = null;
+  // A request that has only just started is kept so that callers in the same
+  // moment share it; an older one is detached (its answer may predate the change).
+  if (_inflight && Date.now() - _inflightStart >= SHARE_WINDOW_MS) _inflight = null;
+}

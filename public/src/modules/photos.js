@@ -6,7 +6,7 @@
  * reachable. When offline, the gallery shows a banner and an empty grid.
  *
  * Folder model:
- *  The gallery has up to two levels of folders. The current location is a
+ *  The gallery has up to three levels of folders. The current location is a
  *  forward-slash-joined path string ("" = root, "vacation" = one level deep,
  *  "vacation/2026" = two levels). Folders are listed as tiles before the
  *  photo grid; tapping a folder enters it; the back-button goes one level up.
@@ -27,7 +27,7 @@
 
 import { CONFIG } from '../config.js';
 import { isLocalAvailable, invalidateLocal, authHeaders, getActiveBase } from '../localBridge.js';
-import { clearToken } from '../auth.js';
+import { clearToken, hasRole } from '../auth.js';
 
 // Computed lazily so a network change (LAN ↔ Tailscale) is picked up
 // automatically — see localBridge.getActiveBase() + probeBase().
@@ -35,10 +35,28 @@ const photosUrl  = () => getActiveBase() + CONFIG.LOCAL_PHOTOS_PATH;
 const foldersUrl = () => photosUrl() + '/folders';
 
 // Maximum folder nesting depth — must match server's MAX_FOLDER_DEPTH.
-const MAX_FOLDER_DEPTH = 2;
+const MAX_FOLDER_DEPTH = 3;
+
+// Thumbnail loading: start a tile's fetch when it comes near the viewport, and
+// never have more than this many in flight (a folder can hold thousands).
+const MAX_THUMBS_INFLIGHT = 6;
+const THUMB_ROOT_MARGIN   = '600px 0px';
 
 // MIME types the server accepts — mirrors PHOTO_TYPES in server.js.
-const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+
+/**
+ * The Content-Type to upload a file with, or '' when it is not accepted.
+ * HEIC/HEIF files often arrive with an empty or generic type, so the file
+ * name decides there (the server converts HEIC to JPEG).
+ */
+function uploadType(file) {
+  if (ACCEPTED.includes(file.type)) return file.type;
+  if (!file.type || file.type === 'application/octet-stream') {
+    if (/\.(heic|heif)$/i.test(file.name)) return 'image/heic';
+  }
+  return '';
+}
 
 // Object URLs currently in use by thumbnails, keyed by photo id.
 // Revoked on every re-render so old blobs do not leak memory.
@@ -51,6 +69,16 @@ let currentFolder = '';
 // Most-recently fetched folder list. Cached so the menu can decide whether
 // "Ordner löschen" should be enabled without an extra request.
 let folderList = []; // [{ path, photoCount }, ...]
+
+// Lazy thumbnail loading state. One AbortController per render: re-rendering
+// or leaving the page aborts every thumbnail fetch still running and empties
+// the queue (see resetThumbs).
+let thumbAbort    = null;  // AbortController of the current render
+let thumbObserver = null;  // IntersectionObserver of the current render
+let thumbQueue    = [];    // [{ meta, img, signal }] waiting for a free slot
+let thumbActive   = 0;     // fetches in flight
+// Whether the current grid was built with delete buttons (Power only).
+let gridHasDelete = false;
 
 // ── EXIF helper ───────────────────────────────────────────────────────────────
 
@@ -153,7 +181,7 @@ function storedName(meta) {
   return meta.id + '.' + meta.ext;
 }
 
-/** Current folder's depth: 0 = root, 1 = first level, 2 = second level. */
+/** Current folder's depth: 0 = root, 1 = first level, … up to MAX_FOLDER_DEPTH. */
 function folderDepth(folder) {
   return folder ? folder.split('/').length : 0;
 }
@@ -182,36 +210,57 @@ function folderLeafName(folder) {
  * @returns {Promise<Response>}
  */
 async function api(path, opts = {}) {
-  const r = await fetch(photosUrl() + path, {
-    credentials: 'omit',
-    ...opts,
-    headers: { ...authHeaders(), ...(opts.headers || {}) },
-  });
+  return request(photosUrl() + path, opts);
+}
+
+/** Like api(), but targets the folders endpoint directly. */
+async function folderApi(opts = {}, queryOrPath = '') {
+  return request(foldersUrl() + queryOrPath, opts);
+}
+
+/**
+ * Shared fetch for api() and folderApi().
+ *
+ * A non-OK answer throws an Error carrying `.status` and the server's JSON
+ * `error` text as message; callers show that reason. A thrown Error WITHOUT
+ * `.status` means the server could not be reached (or the request was aborted).
+ * The availability cache is only invalidated for network errors and 5xx — a
+ * 4xx proves the server is up, so it must not flip the app to "offline".
+ */
+async function request(url, opts) {
+  let r;
+  try {
+    r = await fetch(url, {
+      credentials: 'omit',
+      ...opts,
+      headers: { ...authHeaders(), ...(opts.headers || {}) },
+    });
+  } catch (e) {
+    if (!opts.signal?.aborted) invalidateLocal();
+    throw e;
+  }
   if (r.status === 401) {
     clearToken();
     location.reload();
   }
   if (!r.ok) {
-    invalidateLocal();
-    throw new Error('HTTP_' + r.status);
+    if (r.status >= 500) invalidateLocal();
+    const detail = await r.json().catch(() => ({}));
+    const err = new Error(detail.error || ('HTTP ' + r.status));
+    err.status = r.status;
+    throw err;
   }
   return r;
 }
 
-/** Like api(), but targets the folders endpoint directly. */
-async function folderApi(opts = {}, queryOrPath = '') {
-  const r = await fetch(foldersUrl() + queryOrPath, {
-    credentials: 'omit',
-    ...opts,
-    headers: { ...authHeaders(), ...(opts.headers || {}) },
-  });
-  if (r.status === 401) { clearToken(); location.reload(); }
-  if (!r.ok) {
-    invalidateLocal();
-    const detail = await r.json().catch(() => ({}));
-    throw new Error(detail.error || ('HTTP_' + r.status));
-  }
-  return r;
+/** Appends the cache-buster: the server reuses ids after a delete and caches for a day. */
+function versionQuery(meta, first) {
+  return meta.uploaded ? (first ? '?' : '&') + 'v=' + encodeURIComponent(meta.uploaded) : '';
+}
+
+/** "Server nicht erreichbar" only when there was no HTTP answer at all. */
+function failText(prefix, e) {
+  return e.status ? `${prefix}: ${e.message}` : `${prefix} — Server nicht erreichbar.`;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -230,9 +279,12 @@ function renderMenu() {
   const newBtn = document.getElementById('photo-menu-newfolder');
   const delBtn = document.getElementById('photo-menu-delfolder');
 
+  // Folder management needs Power (the server enforces it too).
+  const power = hasRole('Power');
+
   // "Neuer Ordner" is only allowed when the current depth still has room for
   // a child (i.e. depth < MAX_FOLDER_DEPTH).
-  newBtn.hidden = (folderDepth(currentFolder) >= MAX_FOLDER_DEPTH);
+  newBtn.hidden = !power || (folderDepth(currentFolder) >= MAX_FOLDER_DEPTH);
 
   // "Ordner löschen" only applies to the current folder when:
   // - we're not at root, AND
@@ -244,7 +296,12 @@ function renderMenu() {
     const hasChild  = folderList.some(f => f.path.startsWith(currentFolder + '/'));
     canDelete = !hasPhotos && !hasChild;
   }
-  delBtn.hidden = !canDelete;
+  delBtn.hidden = !power || !canDelete;
+
+  // No entry available → no ⋮ button either.
+  const menuBtn = document.getElementById('photo-menu-btn');
+  menuBtn.hidden = newBtn.hidden && delBtn.hidden;
+  if (menuBtn.hidden) closeMenu();
 }
 
 /** Renders the folder-tile row (folders that are direct children of currentFolder). */
@@ -263,10 +320,18 @@ function renderFolders() {
     const tile = document.createElement('button');
     tile.className = 'photo-folder-tile';
     tile.dataset.path = f.path;
-    tile.innerHTML = `
-      <span class="photo-folder-icon">📁</span>
-      <span class="photo-folder-name">${folderLeafName(f.path)}</span>
-      <span class="photo-folder-count">${f.photoCount}</span>`;
+    // DOM nodes + textContent: folder names are server data, never markup.
+    const part = (cls, text) => {
+      const s = document.createElement('span');
+      s.className = cls;
+      s.textContent = text;
+      return s;
+    };
+    tile.append(
+      part('photo-folder-icon', '📁'),
+      part('photo-folder-name', folderLeafName(f.path)),
+      part('photo-folder-count', String(f.photoCount)),
+    );
     tile.addEventListener('click', () => enterFolder(f.path));
     row.appendChild(tile);
   }
@@ -292,6 +357,33 @@ function renderGrid(photos) {
   }
 
   grid.innerHTML = '';
+
+  // New render → drop whatever the previous one still had queued or running.
+  resetThumbs();
+  thumbAbort = new AbortController();
+  const signal = thumbAbort.signal;
+  const jobs = new Map(); // img element → { meta, img, signal } for the observer
+  if ('IntersectionObserver' in window) {
+    // The page (.page, overflow-y:auto) is the scroll container, not the viewport.
+    // A tile stays observed until its fetch actually starts: when a fast scroll
+    // carries it out of the margin again before a slot was free, its queued job
+    // is dropped — otherwise every tile passed on the way to the bottom of a
+    // 3,000-photo folder would be fetched before the visible ones.
+    thumbObserver = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        const job = jobs.get(e.target);
+        if (!job) continue;
+        if (e.isIntersecting) {
+          if (!job.queued) { job.queued = true; enqueueThumb(job); }
+        } else if (job.queued) {
+          job.queued = false;
+          thumbQueue = thumbQueue.filter(j => j !== job);
+        }
+      }
+    }, { root: document.getElementById('page-photos'), rootMargin: THUMB_ROOT_MARGIN });
+  }
+  const power = hasRole('Power');
+  gridHasDelete = power;
 
   // "Empty" hint only matters if both photos AND folders are empty here.
   const folderRow = document.getElementById('photo-folders');
@@ -341,25 +433,67 @@ function renderGrid(photos) {
     dl.title = 'Herunterladen';
     dl.addEventListener('click', e => { e.stopPropagation(); downloadPhoto(meta); });
 
-    const del = document.createElement('button');
-    del.className = 'photo-del';
-    del.textContent = '✕';
-    del.title = 'Löschen';
-    del.addEventListener('click', e => { e.stopPropagation(); deletePhoto(meta); });
-
-    bar.append(dl, del);
+    bar.append(dl);
+    // Delete needs Power (the server enforces it too) — Family never sees it.
+    if (power) {
+      const del = document.createElement('button');
+      del.className = 'photo-del';
+      del.textContent = '✕';
+      del.title = 'Löschen';
+      del.addEventListener('click', e => { e.stopPropagation(); deletePhoto(meta); });
+      bar.append(del);
+    }
     tile.appendChild(bar);
     // Tap the tile (not the buttons) to open the fullscreen viewer.
     tile.addEventListener('click', () => openLightbox(meta));
     grid.appendChild(tile);
 
     // Load the thumbnail image bytes (auth-protected → fetch as blob).
-    loadThumb(meta, img);
+    const job = { meta, img, signal, queued: false };
+    if (objectUrls.has(meta.id)) {
+      loadThumb(job);                       // cache hit: no request, no queue slot
+    } else if (thumbObserver) {
+      jobs.set(img, job);
+      // The fetch has begun: nothing left to decide about this tile.
+      job.onStart = () => { jobs.delete(img); thumbObserver?.unobserve(img); };
+      thumbObserver.observe(img);           // starts when near the viewport
+    } else {
+      enqueueThumb(job);                    // no IntersectionObserver: queue in order
+    }
   }
 }
 
-/** Fetches one photo's bytes and shows them in the given <img>. */
-async function loadThumb(meta, img) {
+/** Aborts running thumbnail fetches, disconnects the observer, empties the queue. */
+function resetThumbs() {
+  thumbAbort?.abort();
+  thumbObserver?.disconnect();
+  thumbAbort = thumbObserver = null;
+  thumbQueue = [];
+  thumbActive = 0;
+}
+
+/** Queues a thumbnail load; at most MAX_THUMBS_INFLIGHT run at the same time. */
+function enqueueThumb(job) {
+  thumbQueue.push(job);
+  pumpThumbs();
+}
+
+function pumpThumbs() {
+  while (thumbActive < MAX_THUMBS_INFLIGHT && thumbQueue.length) {
+    const job = thumbQueue.shift();
+    job.onStart?.();
+    thumbActive++;
+    loadThumb(job).finally(() => {
+      // An aborted render already reset the counters — do not touch them.
+      if (job.signal.aborted) return;
+      thumbActive--;
+      pumpThumbs();
+    });
+  }
+}
+
+/** Fetches one photo's bytes and shows them in the job's <img>. */
+async function loadThumb({ meta, img, signal }) {
   // Apply the persisted display-rotation regardless of cache state — the
   // transform depends only on meta.rotate, and the cache-hit path below
   // returns early.
@@ -370,11 +504,14 @@ async function loadThumb(meta, img) {
     // ?thumb=1 → small server-generated JPEG for the grid. Download and any
     // full view still fetch the original (no ?thumb). Falls back to the full
     // image automatically if the server has no thumbnailer installed.
-    const blob = await (await api('/' + meta.id + '?thumb=1')).blob();
+    const blob = await (await api('/' + meta.id + '?thumb=1' + versionQuery(meta, false), { signal })).blob();
+    if (signal.aborted) return;
     const url  = URL.createObjectURL(blob);
     objectUrls.set(meta.id, url);
     img.src = url;
   } catch {
+    // An aborted load (page left, grid re-rendered) is not a failed image.
+    if (signal.aborted) return;
     img.classList.add('photo-thumb-failed');
     img.alt = 'Bild konnte nicht geladen werden';
   }
@@ -459,7 +596,7 @@ async function loadLightboxImage(meta) {
   Array.from(content.children).forEach(c => { if (c.id !== 'photo-lb-crop-overlay') c.remove(); });
   clearCropOverlay();
   try {
-    const blob = await (await api('/' + meta.id)).blob();
+    const blob = await (await api('/' + meta.id + versionQuery(meta, true))).blob();
     if (lb.hidden) return;                    // closed while loading
     if (_lbUrl) URL.revokeObjectURL(_lbUrl);
     _lbUrl = URL.createObjectURL(blob);
@@ -865,7 +1002,7 @@ function closeLightbox() {
 /** Downloads a photo to the device using a temporary <a download> element. */
 async function downloadPhoto(meta) {
   try {
-    const blob = await (await api('/' + meta.id)).blob();
+    const blob = await (await api('/' + meta.id + versionQuery(meta, true))).blob();
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
@@ -876,8 +1013,8 @@ async function downloadPhoto(meta) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch {
-    setStatus('Download fehlgeschlagen — Server nicht erreichbar.', true);
+  } catch (e) {
+    setStatus(failText('Download fehlgeschlagen', e), true);
   }
 }
 
@@ -888,8 +1025,8 @@ async function deletePhoto(meta) {
     await api('/' + meta.id, { method: 'DELETE' });
     setStatus('Foto gelöscht.');
     load();
-  } catch {
-    setStatus('Löschen fehlgeschlagen — Server nicht erreichbar.', true);
+  } catch (e) {
+    setStatus(failText('Löschen fehlgeschlagen', e), true);
   }
 }
 
@@ -907,10 +1044,14 @@ async function uploadFiles(fileList) {
     return;
   }
 
-  let done = 0, skipped = 0;
-  for (const file of files) {
-    if (!ACCEPTED.includes(file.type)) { skipped++; continue; }
-    setStatus(`Lade hoch… (${done + 1}/${files.length})`);
+  // A per-file HTTP error (e.g. 415) fails only that file; a network error
+  // means the server is gone, so the rest is counted as failed and we stop.
+  const accepted = files.filter(f => uploadType(f));
+  const skipped  = files.length - accepted.length;
+  let done = 0, failed = 0, reason = '';
+  for (let i = 0; i < accepted.length; i++) {
+    const file = accepted[i];
+    setStatus(`Lade hoch… (${i + 1}/${accepted.length})`);
     try {
       // Prefer the EXIF capture date (reliable on both iOS and Android).
       // Android's file picker often sets lastModified to the share time rather
@@ -923,18 +1064,23 @@ async function uploadFiles(fileList) {
       }).toString();
       await api('?' + qs, {
         method:  'POST',
-        headers: { 'Content-Type': file.type },
+        headers: { 'Content-Type': uploadType(file) },
         body:    file,
       });
       done++;
-    } catch {
-      setStatus('Upload fehlgeschlagen — Server nicht erreichbar.', true);
+    } catch (e) {
+      if (e.status) { failed++; reason = e.message; continue; }
+      failed += accepted.length - i;
+      reason = 'Server nicht erreichbar';
       break;
     }
   }
 
-  if (done)    setStatus(`${done} Foto${done !== 1 ? 's' : ''} hochgeladen.`);
-  if (skipped) setStatus(`${skipped} Datei(en) übersprungen — nur JPEG, PNG, WebP, GIF.`, true);
+  const parts = [];
+  if (done)    parts.push(`${done} hochgeladen`);
+  if (failed)  parts.push(`${failed} fehlgeschlagen: ${reason}`);
+  if (skipped) parts.push(`${skipped} übersprungen (nur JPEG, PNG, WebP, GIF, HEIC)`);
+  setStatus(parts.length ? parts.join(', ') : '', failed > 0 || skipped > 0);
   load();
 }
 
@@ -980,7 +1126,7 @@ async function createFolderInteractive() {
     setStatus(`Ordner „${name}" angelegt.`);
     await load();
   } catch (e) {
-    setStatus('Anlegen fehlgeschlagen: ' + e.message, true);
+    setStatus(failText('Anlegen fehlgeschlagen', e), true);
   }
 }
 
@@ -995,7 +1141,7 @@ async function deleteFolderInteractive() {
     currentFolder = parentFolder(currentFolder);
     await load();
   } catch (e) {
-    setStatus('Löschen fehlgeschlagen: ' + e.message, true);
+    setStatus(failText('Löschen fehlgeschlagen', e), true);
   }
 }
 
@@ -1092,6 +1238,15 @@ export function initPhotos() {
   // a fresh health-check so photos appear immediately after joining home WiFi.
   window.addEventListener('pwa:page', e => {
     if (e.detail === 'photos') { invalidateLocal(); load(); }
+    else resetThumbs(); // left the page: stop fetching thumbnails nobody sees
+  });
+
+  // Role changes (admin promotion picked up later): re-apply the Power-only
+  // controls. The grid is rebuilt only when the delete buttons must change;
+  // cached thumbnails are reused, so that costs no requests.
+  window.addEventListener('pwa:role-changed', () => {
+    renderMenu();
+    if (hasRole('Power') !== gridHasDelete) renderGrid(_gallery);
   });
 
   // Reload when the device comes back onto the home network.

@@ -18,8 +18,11 @@ Zugangsschlüssel.
 - **Share** — Allzweck-Dateiablage, ≤ 100 MB
 - **Farbe / Info** — Hilfsmittel & Diagnose
 
-Rollen-basiert (Visitor / Family / Power / Admin) — die ersten beiden ohne
-Server-Zugriff.
+Rollen-basiert (Visitor / Family / Power / Admin), vom Server durchgesetzt:
+Visitor sieht die öffentlichen Teile (Wetter, Abfahrten, Farbe, Info,
+Familienbild); Family zusätzlich TODO, Fotos (ansehen und hochladen) und
+Hauschat; Power zusätzlich Fotos löschen, Ordner verwalten, Share und den
+KI-Assistenten; Admin alles.
 
 ## Repo-Layout
 

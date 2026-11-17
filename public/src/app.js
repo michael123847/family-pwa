@@ -17,7 +17,7 @@ import { initTodo }            from './modules/todo.js';
 import { initSwatch }          from './modules/swatch.js';
 import { initPhotos }          from './modules/photos.js';
 import { initHauschat }        from './modules/hauschat.js';
-import { initInfo }            from './modules/info.js';
+import { initInfo, setSwError } from './modules/info.js';
 import { initAudiotest }       from './modules/audiotest.js';
 import { initAi }             from './modules/ai.js';
 import { initShare }          from './modules/share.js';
@@ -48,9 +48,13 @@ export async function boot() {
   const { show: showPage, saved: initialPage } = initTabs();
 
   // Register the Service Worker for offline caching of the app shell.
-  // Errors are silently ignored — the app works without a SW.
+  // The app works without a SW, so a failure is not fatal — but it is logged
+  // and remembered so the Info page can show why offline start is unavailable.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      setSwError(err);
+      console.warn('Service worker registration failed:', err);
+    });
     // The SW posts {type:'open-hauschat'} when the user taps a chat
     // notification on a window that's already focused. Route to Hauschat.
     navigator.serviceWorker.addEventListener('message', e => {
