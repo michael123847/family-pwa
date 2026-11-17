@@ -48,6 +48,7 @@ let device   = null;  // { id, name } — set after the name has been chosen
 let messages = [];     // in-memory copy of all known messages
 let cursor   = 0;      // highest server seq fetched so far
 let syncing  = false;  // guard against overlapping sync() calls
+let registered = false; // POST /register succeeded in this session (see sync())
 
 let channel     = null;  // UltrasoundChannel — the reusable sound transport
 let usAvailable = false; // whether ggwave/microphone are usable on this device
@@ -228,6 +229,14 @@ async function sync() {
     if (!(await isLocalAvailable())) { setOffline(true); return; }
     setOffline(false);
 
+    // 0. Tell the server this device exists — once per session, here rather
+    //    than only in saveName(), so a name chosen offline is registered later.
+    //    Best-effort: the name also travels with every message.
+    if (!registered) {
+      try { await api('/register', { method: 'POST', body: { id: device.id, name: device.name } }); registered = true; }
+      catch { /* retried on the next sync */ }
+    }
+
     // 1. Upload messages that have not reached the server yet.
     for (const m of messages.filter(x => x.status === 'pending')) {
       try {
@@ -244,7 +253,15 @@ async function sync() {
     }
 
     // 2. Fetch messages newer than the cursor and merge them in.
-    const data    = await api('/messages?since=' + cursor);
+    let data = await api('/messages?since=' + cursor);
+    if (typeof data.seq === 'number' && data.seq < cursor) {
+      // The server's numbering restarted (its store was reset): our cursor is
+      // ahead of everything it will ever send until it catches up. Start over
+      // from 0 once; known messages are skipped by id below.
+      cursor = 0;
+      await idbPut('meta', { k: 'cursor', seq: 0 });
+      data = await api('/messages?since=0');
+    }
     let   changed = false;
     for (const m of data.messages) {
       if (m.seq > cursor) cursor = m.seq;
@@ -335,10 +352,7 @@ async function saveName() {
   device = { id: crypto.randomUUID(), name };
   await idbPut('meta', { k: 'device', id: device.id, name: device.name });
 
-  if (await isLocalAvailable()) {
-    try { await api('/register', { method: 'POST', body: { id: device.id, name: device.name } }); }
-    catch { /* registration is best-effort — the name also travels with messages */ }
-  }
+  registered = false; // a new identity: sync() registers it
   showChat();
   sync();
 }
@@ -562,9 +576,10 @@ export async function initHauschat() {
   document.querySelector('[data-subpage="hauschat"]')
     ?.addEventListener('click', () => { if (device) sync(); });
 
-  // Poll only while the Hauschat subpage is actually visible.
+  // Poll only while the Hauschat subpage is actually visible (and the app is
+  // in the foreground — a hidden page would keep waking the radio).
   setInterval(() => {
-    if (device && document.getElementById('page-hauschat').classList.contains('active')) sync();
+    if (device && !document.hidden && document.getElementById('page-hauschat').classList.contains('active')) sync();
   }, POLL_MS);
 
   // Sync when the device comes back onto the home network.

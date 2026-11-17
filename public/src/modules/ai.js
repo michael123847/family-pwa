@@ -71,7 +71,8 @@ function clearPendingJob() {
 
 function esc(s) {
   return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;'); // also used inside value="…" attributes
 }
 
 // Renders the Markdown an LLM emits as safe HTML. esc() runs first, so every

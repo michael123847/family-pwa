@@ -26,6 +26,16 @@ const LABEL_KEY      = 'pwa.auth.label';     // cached device label
 // without showing the welcome dialog again.
 const PREV_LABEL_KEY = 'pwa.auth.prevlabel';
 
+// True while the welcome dialog is on screen: no silent enrolment may run
+// then (it would create a second whitelist entry for the same device).
+let welcomeOpen = false;
+// The running enroll() call, so a second caller shares it instead of posting twice.
+let enrolling = null;
+// Pending silent-retry timer (see scheduleEnrollRetry).
+let retryTimer = null;
+// watchVisibility() registers its listener once, however often ensureEnrolled runs.
+let watching = false;
+
 // Role hierarchy — kept in sync with server.js ROLES.
 export const ROLES = ['Visitor', 'Family', 'Power', 'Admin'];
 
@@ -180,7 +190,8 @@ async function backgroundRetry(delayMs = 5000) {
       } else if (er.status === 'rate-limited') {
         console.warn(`Silent re-enroll rate-limited — retry in ${er.retryAfter}s.`);
       } else {
-        console.warn('Silent re-enrollment failed — reload to retry.');
+        console.warn('Silent re-enrollment failed — retrying in the background.');
+        scheduleEnrollRetry(label);
       }
       return;
     }
@@ -204,7 +215,12 @@ async function backgroundRetry(delayMs = 5000) {
  * @param {string} [label] — explicit device label (from the welcome prompt).
  *                            Falls back to defaultLabel() if not given.
  */
-async function enroll(label) {
+function enroll(label) {
+  if (!enrolling) enrolling = doEnroll(label).finally(() => { enrolling = null; });
+  return enrolling;
+}
+
+async function doEnroll(label) {
   try {
     const r = await fetch(getActiveBase() + '/api/enroll-self', {
       method:  'POST',
@@ -275,11 +291,14 @@ function showRateLimitMessage(retryAfterSec) {
  * attempt a silent re-enrollment so the device heals without a page reload.
  */
 function watchVisibility() {
+  if (watching) return;
+  watching = true;
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
     if (getToken()) {
       refreshWhoami(); // best-effort; fires pwa:role-changed on its own if role updated
     } else {
+      if (welcomeOpen) return; // the user is about to choose a name — don't enrol behind the dialog
       // Token was cleared (backgroundRetry or explicit revocation). Re-enroll
       // silently using the label the device had before — no welcome dialog.
       const label = localStorage.getItem(PREV_LABEL_KEY) || defaultLabel();
@@ -290,6 +309,25 @@ function watchVisibility() {
       }
     }
   });
+}
+
+/**
+ * Keeps trying to enrol in the background after a failed attempt — without
+ * ever showing the welcome dialog again. Backs off from 10 s up to 60 s; a
+ * rate-limited answer waits the server's retry_after instead. Stops once a
+ * token exists (this retry or the visibility handler succeeded).
+ */
+function scheduleEnrollRetry(label, delayMs = 10_000) {
+  if (retryTimer) return;
+  retryTimer = setTimeout(async () => {
+    retryTimer = null;
+    if (getToken()) return;
+    const er = await enroll(label);
+    if (er.status === 'ok') { await refreshWhoami(); return; }
+    scheduleEnrollRetry(label, er.status === 'rate-limited'
+      ? Math.max(10_000, er.retryAfter * 1000)
+      : Math.min(delayMs * 1.5, 60_000));
+  }, delayMs);
 }
 
 /**
@@ -336,30 +374,37 @@ export async function ensureEnrolled() {
     if (er.status === 'rate-limited') {
       // The user is staring at the page; explain what happened instead of
       // dropping them into the welcome dialog as if they were a new device.
+      // The dialog only resolves on a click, so arm the retry first.
+      scheduleEnrollRetry(prevLabel, er.retryAfter * 1000);
       await showRateLimitMessage(er.retryAfter);
       return;
     }
-    // Server unreachable or other failure; fall through to the welcome dialog
-    // so the user at least knows the app is trying.
+    // Server unreachable or other failure. This device already has a name, so
+    // retry quietly in the background instead of asking again.
+    console.warn('Enrollment failed — will retry in the background.');
+    scheduleEnrollRetry(prevLabel);
+    return;
   }
 
   // Truly first install on this browser — show the welcome dialog so the
   // admin tool gets something meaningful instead of just "Android"/"iPhone".
+  welcomeOpen = true;
   const label = await promptDeviceName();
+  welcomeOpen = false;
+  // Remember the name right away: every later attempt (retry, visibility
+  // handler, next start) then enrols silently with it.
+  localStorage.setItem(PREV_LABEL_KEY, label);
   const er = await enroll(label);
   if (er.status === 'rate-limited') {
+    scheduleEnrollRetry(label, er.retryAfter * 1000);
     await showRateLimitMessage(er.retryAfter);
     return;
   }
   if (er.status !== 'ok') {
     // Couldn't enroll. UI will load with role="" and most subapps hidden.
     // Wetter / Abfahrten / Farben work without a token (public APIs).
-    // Schedule a retry — server may come up shortly. Reuse the label so the
-    // user doesn't get re-prompted.
+    // Retry with backoff — the server may come up shortly. No new dialog.
     console.warn('Enrollment failed — running in degraded mode, will retry.');
-    setTimeout(async () => {
-      const er2 = await enroll(label);
-      if (er2.status !== 'ok') setTimeout(ensureEnrolled, 10_000);
-    }, 10_000);
+    scheduleEnrollRetry(label);
   }
 }

@@ -45,9 +45,11 @@
     <p class="section-label">TODO-Liste</p>
     <div class="todo-add">
       <input type="text" class="todo-input" id="todo-input"
-             placeholder="Neuer Eintrag…" autocomplete="off" aria-label="Neuer Eintrag">
+             placeholder="Neuer Eintrag…" autocomplete="off" maxlength="1000" aria-label="Neuer Eintrag">
       <button class="add-btn" id="add-btn" aria-label="Hinzufügen">+</button>
     </div>
+    <input type="search" class="todo-search" id="todo-search"
+           placeholder="Suchen…" autocomplete="off" aria-label="Suchen">
     <div class="us-bar" id="todo-us-bar">
       <button class="us-btn" id="todo-us-toggle">📡 Ultraschall</button>
       <button class="us-btn us-freq" id="todo-us-freq" hidden>Modus: Ultraschall</button>

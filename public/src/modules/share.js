@@ -6,7 +6,7 @@
  *  - Any file type accepted (no MIME filter)
  *  - The on-disk filename is the original upload name (sanitised only against
  *    Windows-illegal chars), so the share folder is usable from File Explorer
- *  - Same 2-level folder model + ⋮ menu for create/delete
+ *  - Same 3-level folder model + ⋮ menu for create/delete
  *  - No thumbnails — list view with file icon + name + size
  *  - Filename conflicts trigger a Windows-style modal: Ersetzen / Beide
  *    behalten / Abbrechen
@@ -20,7 +20,7 @@ import { clearToken } from '../auth.js';
 const shareUrl   = () => getActiveBase() + CONFIG.LOCAL_SHARE_PATH;
 const foldersUrl = () => shareUrl() + '/folders';
 
-const MAX_FOLDER_DEPTH = 2;
+const MAX_FOLDER_DEPTH = 3;
 const MAX_BYTES        = 100 * 1024 * 1024;
 
 let currentFolder = '';        // "" = root
@@ -126,10 +126,18 @@ function renderFolders() {
     const tile = document.createElement('button');
     tile.className = 'photo-folder-tile';
     tile.dataset.path = f.path;
-    tile.innerHTML = `
-      <span class="photo-folder-icon">📁</span>
-      <span class="photo-folder-name">${folderLeafName(f.path)}</span>
-      <span class="photo-folder-count">${f.fileCount}</span>`;
+    // DOM nodes + textContent: folder names are server data, never markup.
+    const part = (cls, text) => {
+      const s = document.createElement('span');
+      s.className = cls;
+      s.textContent = text;
+      return s;
+    };
+    tile.append(
+      part('photo-folder-icon', '📁'),
+      part('photo-folder-name', folderLeafName(f.path)),
+      part('photo-folder-count', String(f.fileCount)),
+    );
     tile.addEventListener('click', () => enterFolder(f.path));
     row.appendChild(tile);
   }
@@ -303,27 +311,37 @@ async function uploadFiles(fileList) {
     return;
   }
 
-  let done = 0, skipped = 0, errors = 0;
+  let done = 0, skipped = 0, errors = 0, netDown = false;
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     setStatus(`Lade hoch… (${i + 1}/${files.length}) ${file.name}`);
-    let result = await uploadOne(file, 'reject');
+    // uploadOne throws on a network error (the server is gone). Catch it so the
+    // status never stays on "Lade hoch…"; the remaining files would fail too.
+    try {
+      let result = await uploadOne(file, 'reject');
 
-    if (result.conflict) {
-      const choice = await askConflict(file.name);
-      if (choice === null) { skipped++; continue; }
-      result = await uploadOne(file, choice);
+      if (result.conflict) {
+        const choice = await askConflict(file.name);
+        if (choice === null) { skipped++; continue; }
+        result = await uploadOne(file, choice);
+      }
+
+      if (result.error)    { errors++;  setStatus(result.error, true); continue; }
+      if (result.ok)       { done++; }
+    } catch {
+      errors += files.length - i;
+      netDown = true;
+      break;
     }
-
-    if (result.error)    { errors++;  setStatus(result.error, true); continue; }
-    if (result.ok)       { done++; }
   }
 
   const parts = [];
   if (done)    parts.push(`${done} hochgeladen`);
   if (skipped) parts.push(`${skipped} übersprungen`);
   if (errors)  parts.push(`${errors} Fehler`);
-  setStatus(parts.length ? parts.join(', ') + '.' : '', errors > 0);
+  let summary = parts.join(', ');
+  if (netDown) summary += (summary ? ' — ' : '') + 'Server nicht erreichbar';
+  setStatus(summary ? summary + '.' : '', errors > 0);
   load();
 }
 

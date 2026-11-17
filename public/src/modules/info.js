@@ -48,6 +48,19 @@ function platformLabel() {
   return os + ' · ' + br;
 }
 
+// Why the Service Worker could not be registered (null = no failure). Set by
+// app.js; shown in the "Service Worker" row so a missing offline start is not silent.
+let swError = null;
+
+/** Remembers a failed Service Worker registration for the Info page. */
+export function setSwError(err) {
+  swError = String(err?.message || err);
+  if (document.getElementById('page-info')?.classList.contains('active') && document.getElementById('info-content')) render();
+}
+
+/** Escapes text for use inside the innerHTML template below. */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 /** The version embedded in the Service Worker's shell cache (e.g. "v14"). */
 async function swCacheVersion() {
   try {
@@ -92,8 +105,10 @@ async function render() {
   box.innerHTML = [
     row('App-Version',   CONFIG.APP_VERSION,
         CONFIG.APP_VERSION === swVer.replace(/^fpwa-/, '') ? 'good' : 'warn'),
-    row('Service Worker', waiting ? swVer + ' · Update bereit' : swVer,
-        waiting ? 'warn' : undefined),
+    swError
+      ? row('Service Worker', 'Nicht registriert: ' + esc(swError), 'warn')
+      : row('Service Worker', waiting ? swVer + ' · Update bereit' : swVer,
+            waiting ? 'warn' : undefined),
     row('Heim-Server',   server ? 'Online' : 'Offline', server ? 'good' : undefined),
     // Which route are we using right now — LAN_BASE, cached LAN-IP, or
     // Tailscale? "good" tone when on a LAN path (faster, no Tailscale hop).

@@ -26,6 +26,23 @@
  *  re-render immediately, without waiting for the server. If the server call
  *  fails, the change is added to the pending queue for later sync.
  *
+ * Sync rules:
+ *  - One load() at a time. A call while one runs only sets a flag; when the
+ *    running load ends with the flag set, exactly one more run follows.
+ *  - While the queue is not empty (or a load is running) a new change is
+ *    queued behind the earlier ones instead of being sent past them, so the
+ *    server sees the changes in the order they were made.
+ *  - An op the server rejects for good (400, or 404 for an item that is gone)
+ *    is dropped; any other HTTP error keeps it; a network error stops the
+ *    replay and keeps this op and all later ones.
+ *  - After the GET the still-queued changes are re-applied to the fetched
+ *    list (applyPending), so an unsynced item never disappears.
+ *
+ * Display:
+ *  Open items are shown above done ones, and the search field narrows the view
+ *  by case-insensitive text match. Both are display-only — the stored order
+ *  (newest first, as the server keeps it) is never changed.
+ *
  * Ultrasound (peer-to-peer over sound):
  *  When ultrasound mode is on, a newly added item is also broadcast as sound
  *  via the shared UltrasoundChannel; nearby devices decode it and add it —
@@ -42,6 +59,9 @@ import { UltrasoundChannel } from '../ultrasoundChannel.js';
 const CACHE_KEY   = 'pwa.todos.cache';   // last known list state
 const PENDING_KEY = 'pwa.todos.pending'; // operations waiting to be synced
 
+// Longest item text the server accepts (the add input has the same maxlength).
+const MAX_TEXT = 1000;
+
 // Separator between id and text in the ultrasound envelope. A TODO envelope
 // has exactly one separator (2 fields) — that field count tells it apart from
 // other subapps' payloads on the shared microphone.
@@ -52,6 +72,8 @@ let todos        = [];
 let pendingQueue = [];
 let usChannel    = null;   // UltrasoundChannel — shares new items over sound
 let usAvailable  = false;  // whether ggwave/microphone are usable on this device
+let query        = '';     // text typed in the search field ('' = show everything)
+let emptyDefault = '';     // the "no entries yet" text from index.html, swapped for "Keine Treffer"
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -69,15 +91,16 @@ function readPending() { try { return JSON.parse(localStorage.getItem(PENDING_KE
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Escapes HTML special characters to prevent XSS attacks.
- * User-supplied text (todo labels) must never be inserted into the DOM as raw
- * HTML — always escape first.
- */
-function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Adds whose POST is on the wire: temp id → promise of the real id (null if it
+// failed). A delete of such an item waits for the answer, then deletes the real id.
+const inflightAdds = new Map();
+
+/** Registers the POST of an add; returns `post` unchanged for the caller to await. */
+function trackAdd(tempId, post) {
+  const tracked = post.then(item => item.id, () => null);
+  inflightAdds.set(tempId, tracked);
+  tracked.then(() => inflightAdds.delete(tempId));
+  return post;
 }
 
 /** Returns true for items that have not yet been synced to the server. */
@@ -163,19 +186,29 @@ function broadcastItem(item) {
   usChannel.send(envelope); // the channel reports its own status
 }
 
+// An id on the wire is a client-generated UUID (crypto.randomUUID), with the
+// "tmp-" prefix when the sender has not synced the item yet. The sound can come
+// from any device in earshot, so anything that is not exactly that is dropped.
+const US_ID_RE = /^(tmp-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Handles a payload decoded from the microphone. A TODO envelope has exactly
  * two fields (id + text) — that field count tells it apart from other subapps'
  * payloads on the shared microphone, which are simply ignored here.
  *
+ * The payload is untrusted: the id must be a UUID, the text must not be blank,
+ * and the whole envelope must fit what this app itself would ever send.
  * Deduplicates by id (also drops a device hearing its own broadcast). The home
  * server stays the source of truth and reconciles the list on the next sync.
  */
 function onUltrasoundItem(str) {
   const parts = String(str).split(US_SEP);
   if (parts.length !== 2) return; // not a TODO envelope — ignore
-  const [id, text] = parts;
-  if (!id || !text || todos.some(t => t.id === id)) return;
+  const id   = parts[0];
+  const text = parts[1].trim();
+  if (!US_ID_RE.test(id) || !text) return;
+  if (new TextEncoder().encode(String(str)).length > usChannel.maxBytes) return;
+  if (todos.some(t => t.id === id)) return;
 
   todos.unshift({ id, text, done: false });
   saveCache();
@@ -208,8 +241,10 @@ async function apiRaw(method, body) {
   }
 
   if (!r.ok) {
-    invalidateLocal(); // force a fresh health check on the next call
-    throw new Error('HTTP_' + r.status);
+    if (r.status >= 500) invalidateLocal(); // a 4xx is an answer, not a sign the server is gone
+    const err = new Error('HTTP_' + r.status);
+    err.status = r.status; // absent on network errors — syncPending() tells them apart
+    throw err;
   }
 
   return method === 'DELETE' ? null : r.json();
@@ -217,103 +252,201 @@ async function apiRaw(method, body) {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
+let renderDue = false; // a render() was skipped because an item text had focus
+
 /**
- * Re-renders the entire todo list from the current `todos` array.
+ * Returns the items to display: open items first, done items below, each group
+ * in the stored (newest-first) order, then narrowed by the search text.
+ *
+ * Display-only — `todos` itself stays in server order, so the cache, the
+ * pending queue and every other client are unaffected.
+ */
+function visibleTodos() {
+  const q       = query.trim().toLocaleLowerCase('de');
+  const ordered = [...todos.filter(t => !t.done), ...todos.filter(t => t.done)];
+  return q ? ordered.filter(t => String(t.text).toLocaleLowerCase('de').includes(q)) : ordered;
+}
+
+/**
+ * Builds the DOM row for one item.
+ *
+ * The text is assigned via textContent and the handlers are closures over the
+ * item, so neither the text nor the id is ever parsed as HTML or JavaScript.
+ * Both can originate on another device (ultrasound) and must stay inert.
+ */
+function buildItem(item) {
+  const row = document.createElement('div');
+  row.className = 'todo-item' + (item.done ? ' done' : '') + (isTemp(item.id) ? ' pending' : '');
+
+  const text = document.createElement('span');
+  text.className       = 'todo-text';
+  text.contentEditable = 'true';
+  text.spellcheck      = false;
+  text.textContent     = item.text;
+  text.addEventListener('blur', () => todoEdit(item.id, text, item.text));
+  text.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); text.blur(); }
+  });
+
+  const doneBtn = document.createElement('button');
+  doneBtn.className   = 'done-btn';
+  doneBtn.textContent = item.done ? 'Erledigt' : 'Done';
+  doneBtn.addEventListener('click', () => todoToggle(item.id, item.done));
+
+  const delBtn = document.createElement('button');
+  delBtn.className   = 'del-btn';
+  delBtn.title       = 'Löschen';
+  delBtn.textContent = '✕';
+  delBtn.addEventListener('click', () => todoDelete(item.id));
+
+  row.append(text, doneBtn, delBtn);
+  return row;
+}
+
+/**
+ * Re-renders the todo list from the current `todos` array (visibleTodos()
+ * decides what is shown and in which order).
  *
  * Items with a temporary ID (added offline, not yet synced) get the CSS
- * class "pending" which shows them with a yellow border.
- *
- * Event handlers for toggle, delete, and edit are attached via global
- * window.__todo* functions because the items are rendered as an innerHTML
- * string, not as live DOM nodes with addEventListener.
+ * class "pending" which shows them with a yellow border. The empty-state text
+ * reads "Keine Treffer" when entries exist but the search matches none.
  */
 function render() {
   const list  = document.getElementById('todo-list');
-  const empty = document.getElementById('todo-empty');
-
-  if (!todos.length) {
-    list.innerHTML = '';
-    empty.style.display = 'block';
+  // Never rebuild the rows under a half-typed edit: remember it and render on blur.
+  if (document.activeElement?.classList?.contains('todo-text') && list.contains(document.activeElement)) {
+    renderDue = true;
     return;
   }
+  renderDue = false;
+  const empty = document.getElementById('todo-empty');
+  const shown = visibleTodos();
 
-  empty.style.display = 'none';
-  list.innerHTML = todos.map(item => `
-    <div class="todo-item${item.done ? ' done' : ''}${isTemp(item.id) ? ' pending' : ''}">
-      <span class="todo-text"
-            contenteditable="true" spellcheck="false"
-            onblur="window.__todoEdit('${item.id}',this,'${esc(item.text)}')"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"
-      >${esc(item.text)}</span>
-      <button class="done-btn" onclick="window.__todoToggle('${item.id}',${item.done})">
-        ${item.done ? 'Erledigt' : 'Done'}
-      </button>
-      <button class="del-btn" onclick="window.__todoDelete('${item.id}')" title="Löschen">✕</button>
-    </div>`).join('');
+  const rows = document.createDocumentFragment();
+  shown.forEach(item => rows.append(buildItem(item)));
+  list.replaceChildren(rows);
+
+  empty.textContent   = todos.length ? 'Keine Treffer' : emptyDefault;
+  empty.style.display = shown.length ? 'none' : 'block';
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 
+/** Removes one operation (by identity) from the pending queue and persists it. */
+function removeOp(op) {
+  pendingQueue = pendingQueue.filter(o => o !== op);
+  savePending();
+}
+
 /**
- * Replays all pending operations against the server in order.
- *
- * ID mapping: when an "add" operation succeeds, the server returns a real UUID.
- * That UUID is stored in idMap so that subsequent operations on the same item
- * (toggle, edit, delete) can be sent with the correct ID.
- *
- * Operations that fail are kept in the queue for the next sync attempt.
- * Operations on items with temporary IDs that were never successfully created
- * are skipped (the server would not know them).
+ * True when an op the server answered with `status` can never succeed and is
+ * dropped: 400 (rejected input), or 404 for a change to an item that no
+ * longer exists (deleted on another device). An add that gets 404 is kept —
+ * that is a routing problem, not a verdict on the item.
  */
-async function syncPending() {
-  if (!pendingQueue.length) return;
+function isPoison(op, status) {
+  return status === 400 || (status === 404 && op.op !== 'add');
+}
 
-  const idMap  = {}; // maps tempId → real server-assigned UUID
-  const failed = []; // operations that could not be synced this time
-
-  for (const op of pendingQueue) {
-    // Resolve the ID: if a previous "add" op mapped this temp ID, use the real ID.
-    const id = idMap[op.id] ?? op.id;
-    try {
-      if (op.op === 'add') {
-        const item    = await apiRaw('POST', { text: op.text });
-        idMap[op.id]  = item.id; // remember the mapping for subsequent ops
-        // Update the in-memory list so the temp ID is replaced with the real one.
-        todos = todos.map(t => t.id === op.id ? { ...t, id: item.id } : t);
-        saveCache();
-
-      } else if (op.op === 'toggle') {
-        // Skip if the item still has a temp ID (the add must have failed earlier).
-        if (!isTemp(id)) await apiRaw('PUT', { id, done: op.done });
-
-      } else if (op.op === 'edit') {
-        if (!isTemp(id)) await apiRaw('PUT', { id, text: op.text });
-
-      } else if (op.op === 'delete') {
-        if (!isTemp(id)) await apiRaw('DELETE', { id });
-      }
-    } catch {
-      // Keep the operation with the resolved ID so it can be retried later.
-      failed.push({ ...op, id });
+/**
+ * Re-applies the still-queued changes to a list fetched from the server, so
+ * unsynced work stays visible (and in the cache) after the GET replaced the
+ * list. Pure: returns a new array, `list` and `queue` are not modified.
+ *
+ *  add    → the item (temporary id) goes back on top
+ *  toggle → done flag, edit → text
+ *  delete → the item is removed
+ */
+function applyPending(list, queue) {
+  let out = list.map(t => ({ ...t }));
+  for (const op of queue) {
+    if (op.op === 'add') {
+      if (!out.some(t => t.id === op.id)) out.unshift({ id: op.id, text: op.text, done: false });
+    } else if (op.op === 'toggle') {
+      out = out.map(t => t.id === op.id ? { ...t, done: op.done } : t);
+    } else if (op.op === 'edit') {
+      out = out.map(t => t.id === op.id ? { ...t, text: op.text } : t);
+    } else if (op.op === 'delete') {
+      out = out.filter(t => t.id !== op.id);
     }
   }
+  return out;
+}
 
-  pendingQueue = failed;
-  savePending();
+/**
+ * Replays the pending operations against the server in order.
+ *
+ * ID mapping: when an "add" succeeds the server returns a real UUID, which
+ * replaces the temporary id in the local list and in every queued op that
+ * refers to it.
+ *
+ * The queue is worked off in place (not on a copy) so changes that are queued
+ * while the replay runs are picked up in order. Per op:
+ *  - success             → removed
+ *  - 400 / 404 (poison)  → removed (see isPoison); a rejected add also takes
+ *                          its queued follow-ups and the local item with it
+ *  - other HTTP status   → kept, the replay goes on
+ *  - network error       → this op and all later ones are kept, the replay
+ *                          stops, so the order of the queue is preserved
+ *  - op on a temp id whose add is still queued (it failed) → kept; with no
+ *    add left it can never succeed and is dropped
+ */
+async function syncPending() {
+  const seen = new Set();
+  for (;;) {
+    const op = pendingQueue.find(o => !seen.has(o));
+    if (!op) break;
+    seen.add(op);
+
+    if (isTemp(op.id) && op.op !== 'add') {
+      if (!pendingQueue.some(o => o.op === 'add' && o.id === op.id)) removeOp(op);
+      continue;
+    }
+
+    try {
+      if (op.op === 'add') {
+        const item = await trackAdd(op.id, apiRaw('POST', { text: op.text }));
+        pendingQueue = pendingQueue
+          .filter(o => o !== op)
+          .map(o => o.id === op.id ? { ...o, id: item.id } : o);
+        savePending();
+        todos = todos.map(t => t.id === op.id ? { ...t, id: item.id } : t);
+        saveCache();
+      } else {
+        if (op.op === 'toggle')      await apiRaw('PUT', { id: op.id, done: op.done });
+        else if (op.op === 'edit')   await apiRaw('PUT', { id: op.id, text: op.text });
+        else if (op.op === 'delete') await apiRaw('DELETE', { id: op.id });
+        removeOp(op);
+      }
+    } catch (e) {
+      if (e.status === undefined) return;          // network error: stop, keep the order
+      if (!isPoison(op, e.status)) continue;       // other HTTP error: keep, try later
+      if (op.op === 'add') {
+        pendingQueue = pendingQueue.filter(o => o.id !== op.id);
+        savePending();
+        todos = todos.filter(t => t.id !== op.id);
+        saveCache();
+      } else {
+        removeOp(op);
+      }
+    }
+  }
 }
 
 // ── Load ──────────────────────────────────────────────────────────────────────
 
+let loading     = null;   // promise of the running load(), null when idle
+let reloadAgain = false;  // a load() was requested while one was running
+
 /**
- * Loads the todo list. Always called on startup and when the device comes
- * back online.
+ * One pass: render the cache, sync the queue, fetch the list, render it.
  *
- * Flow:
  *  1. Render the cached list immediately so the screen is never empty.
- *  2. If the local server is reachable: sync pending ops, then fetch fresh data.
- *  3. If the server is not reachable: show the cached list with the offline banner.
+ *  2. If the local server is reachable: sync pending ops, then fetch fresh
+ *     data and lay the still-queued changes over it.
+ *  3. If the server is not reachable: keep the cached list, show the banner.
  */
-async function load() {
+async function loadOnce() {
   // Show the cache immediately — avoids a blank list while the health check runs.
   todos = readCache();
   render();
@@ -321,7 +454,7 @@ async function load() {
   if (await isLocalAvailable()) {
     await syncPending();
     try {
-      todos = await apiRaw('GET');
+      todos = applyPending(await apiRaw('GET'), pendingQueue);
       saveCache();
       setOffline(false);
     } catch {
@@ -333,31 +466,64 @@ async function load() {
   render();
 }
 
+/**
+ * Loads the todo list. Called on startup, on every switch to the TODO tab and
+ * when the device comes back online — so calls overlap. Only one pass runs at
+ * a time (two would POST the same queued add twice); a call while one runs
+ * sets a flag and exactly one more pass follows it.
+ */
+function load() {
+  if (loading) { reloadAgain = true; return loading; }
+  loading = (async () => {
+    try {
+      do { reloadAgain = false; await loadOnce(); } while (reloadAgain);
+    } finally {
+      loading = null;
+    }
+  })();
+  return loading;
+}
+
 // ── Mutations ─────────────────────────────────────────────────────────────────
 
 /**
- * Toggles the done state of a todo item.
- * Updates locally first, then tries the server. If the server is offline,
- * the operation is enqueued.
+ * Sends one change to the server now, or queues it.
+ *
+ * It goes out directly only when nothing is queued and no load is running;
+ * otherwise (or when the send fails) it is queued behind the earlier changes
+ * and a load is triggered, which replays the queue in order.
+ *
+ * @param {object}   op   - the queue entry ({op, id, ...})
+ * @param {Function} send - performs the direct request; throws on failure
  */
-window.__todoToggle = async (id, wasDone) => {
+async function commit(op, send) {
+  const idle = () => !pendingQueue.length && !loading;
+  if (idle() && await isLocalAvailable() && idle()) {
+    try { await send(); return; } catch { /* queue it below */ }
+  }
+  if (op.op === 'add' && !todos.some(t => t.id === op.id)) return; // deleted meanwhile
+  enqueue(op);
+  load(); // syncs when the server is reachable, otherwise shows the offline banner
+}
+
+/**
+ * Toggles the done state of a todo item.
+ * Updates locally first, then sends it (or queues it, see commit()).
+ */
+async function todoToggle(id, wasDone) {
   const newDone = !wasDone;
   todos = todos.map(t => t.id === id ? { ...t, done: newDone } : t);
   saveCache();
   render();
-  if (await isLocalAvailable()) {
-    try { await apiRaw('PUT', { id, done: newDone }); return; } catch {}
-  }
-  enqueue({ op: 'toggle', id, done: newDone });
-  setOffline(true);
-};
+  await commit({ op: 'toggle', id, done: newDone }, () => apiRaw('PUT', { id, done: newDone }));
+}
 
 /**
  * Deletes a todo item.
  * If the item was added offline and has a temp ID, it is simply removed from
  * the local state and the queue — no server call is needed.
  */
-window.__todoDelete = async (id) => {
+async function todoDelete(id) {
   todos = todos.filter(t => t.id !== id);
   saveCache();
   render();
@@ -366,30 +532,35 @@ window.__todoDelete = async (id) => {
     // The item was never saved to the server — remove all queued ops for it.
     pendingQueue = pendingQueue.filter(op => op.id !== id);
     savePending();
+    // Unless its POST is already on the wire: that one will create it, so the
+    // real id is deleted once the answer is in.
+    const realId = await inflightAdds.get(id);
+    if (!realId) return;
+    todos = todos.filter(t => t.id !== realId);
+    saveCache();
+    render();
+    await commit({ op: 'delete', id: realId }, () => apiRaw('DELETE', { id: realId }));
     return;
   }
 
-  if (await isLocalAvailable()) {
-    try { await apiRaw('DELETE', { id }); return; } catch {}
-  }
-  enqueue({ op: 'delete', id });
-};
+  await commit({ op: 'delete', id }, () => apiRaw('DELETE', { id }));
+}
 
 /**
  * Saves an inline edit of a todo item's text.
  * The contenteditable span calls this on blur (when the user clicks away).
- * If the user clears the text entirely, the original text is restored.
+ * If the user clears the text entirely, the item's current text is restored
+ * (from the state, not from what was captured when the row was rendered —
+ * the text may have been edited since).
  */
-window.__todoEdit = async (id, el, original) => {
-  const text = el.textContent.trim();
-  if (!text) { el.textContent = original; return; }
+async function todoEdit(id, el, original) {
+  const text = el.textContent.trim().slice(0, MAX_TEXT);
+  if (text !== el.textContent) el.textContent = text; // local and server agree on the cut
+  if (!text) { el.textContent = todos.find(t => t.id === id)?.text ?? original; return; }
   todos = todos.map(t => t.id === id ? { ...t, text } : t);
   saveCache();
-  if (await isLocalAvailable()) {
-    try { await apiRaw('PUT', { id, text }); return; } catch {}
-  }
-  enqueue({ op: 'edit', id, text });
-};
+  await commit({ op: 'edit', id, text }, () => apiRaw('PUT', { id, text }));
+}
 
 /**
  * Adds a new todo item.
@@ -408,18 +579,13 @@ async function doAdd(text) {
 
   if (usChannel?.enabled) broadcastItem(item); // also emit over sound
 
-  if (await isLocalAvailable()) {
-    try {
-      const created = await apiRaw('POST', { text });
-      // Replace the temporary ID with the real server-assigned UUID.
-      todos = todos.map(t => t.id === tempId ? { ...t, id: created.id } : t);
-      saveCache();
-      render();
-      return;
-    } catch {}
-  }
-  enqueue({ op: 'add', id: tempId, text });
-  setOffline(true);
+  await commit({ op: 'add', id: tempId, text }, async () => {
+    const created = await trackAdd(tempId, apiRaw('POST', { text }));
+    // Replace the temporary ID with the real server-assigned UUID.
+    todos = todos.map(t => t.id === tempId ? { ...t, id: created.id } : t);
+    saveCache();
+    render();
+  });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -439,6 +605,23 @@ export async function initTodo() {
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') { doAdd(input.value); input.value = ''; }
   });
+
+  // A render skipped during an inline edit runs once the edit is committed
+  // (the item's own blur handler has already stored the text by then).
+  // If the blur came from tapping a button on a row, the render waits for that
+  // click to land (its handler runs first); with no click it runs after 300 ms.
+  const todoListEl = document.getElementById('todo-list');
+  let renderTimer = null;
+  const flushRender = () => { clearTimeout(renderTimer); renderTimer = null; if (renderDue) render(); };
+  todoListEl.addEventListener('focusout', () => {
+    if (renderDue) { clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 300); }
+  });
+  todoListEl.addEventListener('click', () => { if (renderDue && renderTimer) setTimeout(flushRender, 0); });
+
+  // Search: filters the displayed list as the user types (display-only).
+  const search = document.getElementById('todo-search');
+  search.addEventListener('input', () => { query = search.value; render(); });
+  emptyDefault = document.getElementById('todo-empty').textContent;
 
   // Ultrasound — the TODO list reuses the shared UltrasoundChannel so new
   // items can spread between devices with no server. The bar is hidden if
